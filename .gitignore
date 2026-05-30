@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv*/
+venv/
+.env
+
+# ROS / colcon
+build/
+install/
+log/
+*.egg-info/
+
+# Large experiment outputs in src
+src/*.csv
+src/*.json
+src/*.jsonl
+src/*.txt
+src/*.png
+src/*.pdf
+src/*.pt
+src/*.npz
+
+# Large output / archive folders
+src/plots*/
+src/fr3_plots*/
+src/fr3_ros_eval_runs*/
+src/delete_later/
+src_cleanup_archive*/
+src/*archive*/
+src/safe_candidates*/
+src/fr3_hardpool_v6_final/
+
+# Generated datasets / scenarios / rollouts
+data/
+rollouts/
+config/generated_scenarios*/
+config/*.zip
+*.bag
+*.db3
+
+# Keep source code
+!src/*.py
+!src/*.cpp
+!src/*.h
+!src/*.hpp
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
