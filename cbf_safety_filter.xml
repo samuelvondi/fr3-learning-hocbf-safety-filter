@@ -1,8 +1,0 @@
-<library path="cbf_safety_filter">
-    <class name="cbf_safety_filter/JointPositionController"
-           type="cbf_safety_filter::JointPositionController" base_class_type="controller_interface::ControllerInterface">
-        <description>
-            The joint position example controller moves in a periodic movement.
-        </description>
-    </class>
-</library>
