@@ -7,13 +7,9 @@ __pycache__/
 venv/
 .env
 
-# ROS / colcon
-build/
-install/
-log/
-*.egg-info/
-
-# Large experiment outputs in src
+# Large experiment outputs in src/
+# (training/eval dumped checkpoints, logs, and tables next to the scripts;
+#  keep them out of the repo — the curated copies live under artifacts/)
 src/*.csv
 src/*.json
 src/*.jsonl
@@ -33,7 +29,10 @@ src/*archive*/
 src/safe_candidates*/
 src/fr3_hardpool_v6_final/
 
-# Generated datasets / scenarios / rollouts
+# Generated datasets / scenarios / rollouts (huge and/or regenerable)
+# NOTE / TRAP: this also ignores scenarios and zips placed under config/.
+# If you regenerate scenarios, do NOT expect to commit them from config/ —
+# the committed copies live under artifacts/scenarios/ instead (see below).
 data/
 rollouts/
 config/generated_scenarios*/
@@ -41,13 +40,19 @@ config/*.zip
 *.bag
 *.db3
 
-# Keep source code
+# Keep source code (un-ignore, in case a broad rule above would catch it)
 !src/*.py
 !src/*.cpp
 !src/*.h
 !src/*.hpp
 
-# OS/editor
+# Reproducibility artifacts are ALWAYS tracked.
+# Everything under artifacts/ must never be ignored, even if a broader rule
+# above would otherwise match it (e.g. *.zip, *.csv, *.npz).
+!artifacts/
+!artifacts/**
+
+# OS / editor
 .DS_Store
 .vscode/
 .idea/
