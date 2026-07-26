@@ -1,0 +1,67 @@
+{
+  "seed": 20260520,
+  "train_frac_before_duplication": 0.85,
+  "split_policy": "Stratified train/val split is performed before train selection and before duplication. Validation has no duplication and no test split; final test is held out separately.",
+  "train_policy": "300 random good from train-good leftovers after hard_good selection, 200 hard_good selected from train-good by smallest min_h/min_psi, all train bad_safety, all train bad_qp, all train bad_goal.",
+  "duplication_policy": {
+    "good": 1,
+    "hard_good": 2,
+    "bad_safety": 4,
+    "bad_qp": 4,
+    "bad_goal": 4
+  },
+  "catalog_counts": {
+    "good": 1216,
+    "bad_safety": 146,
+    "bad_qp": 98,
+    "bad_goal": 40
+  },
+  "train_candidate_counts_after_split": {
+    "good": 1034,
+    "bad_safety": 124,
+    "bad_qp": 83,
+    "bad_goal": 34
+  },
+  "val_candidate_counts_after_split": {
+    "good": 182,
+    "bad_safety": 22,
+    "bad_qp": 15,
+    "bad_goal": 6
+  },
+  "train_unique_counts": {
+    "good": 300,
+    "hard_good": 200,
+    "bad_safety": 124,
+    "bad_qp": 83,
+    "bad_goal": 34
+  },
+  "train_weighted_counts": {
+    "bad_safety": 496,
+    "hard_good": 400,
+    "bad_qp": 332,
+    "good": 300,
+    "bad_goal": 136
+  },
+  "train_unique_total": 741,
+  "train_weighted_total": 1664,
+  "val_unique_counts": {
+    "hard_good": 100,
+    "good": 82,
+    "bad_safety": 22,
+    "bad_qp": 15,
+    "bad_goal": 6
+  },
+  "val_unique_total": 225,
+  "train_val_overlap_count": 0,
+  "paths": {
+    "catalog": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_catalog.csv",
+    "train_candidates_splitfirst": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_train_candidates_splitfirst.csv",
+    "val_candidates_splitfirst": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_val_candidates_splitfirst.csv",
+    "train_unique_csv": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_train_unique.csv",
+    "train_weighted_jsonl": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_train_weighted.jsonl",
+    "train_weighted_txt": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_train_weighted.txt",
+    "val_unique_csv": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_val_unique.csv",
+    "val_unique_jsonl": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_val_unique.jsonl",
+    "val_unique_txt": "/home/simon/davide_fr3_ws/src/cbf_safety_filter/data/fullpool_splits/fullpool_seed20260520_n1500_splitfirst_g300_allfail/fr3_fullpool_val_unique.txt"
+  }
+}
