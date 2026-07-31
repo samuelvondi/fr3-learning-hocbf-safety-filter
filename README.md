@@ -133,8 +133,20 @@ different statistic (48.8% for Fixed + Fallback, 1.4% for NN + Fallback).
 
 ## 2. Requirements
 
-Python 3.10+ (uses `list[str]` / `X | None` syntax). CPU is sufficient; a GPU
-speeds up training only.
+Python 3.10.x, target **3.10.12** — the environment that produced the published
+tables. The lower bound comes from `list[str]` / `X | None` syntax (needs
+≥ 3.10); the upper bound comes from the pinned `numpy == 1.26.4`, which on
+Python ≥ 3.11 conflicts with Pinocchio's `cmeel-boost` (it requires
+`numpy >= 2.3`). `requirements.txt` carries an environment marker so 3.11+ still
+installs (with numpy 2.3.x), but that path is best-effort and not the validated
+environment; for exact reproduction use Python 3.10.12. A clean interpreter is
+easiest via conda:
+
+```bash
+conda create -n fr3 python=3.10 && conda activate fr3
+```
+
+CPU is sufficient; a GPU speeds up training only.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
