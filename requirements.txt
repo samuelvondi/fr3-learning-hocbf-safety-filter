@@ -11,7 +11,46 @@
 # BLAS/LAPACK versions can slightly shift the reported numbers.
 
 # --- direct imports ---
-numpy          == 1.26.4
+# numpy is pinned to 1.26.4 for the canonical Python 3.10.12 environment that
+# produced the published tables. On Python >= 3.11 that pin cannot resolve:
+# Pinocchio (pin==3.9.0) pulls in cmeel-boost, which requires numpy>=2.3 there.
+# The marker below lets 3.11+ install with numpy 2.3.x (best-effort -- NOT the
+# validated environment). For exact-digit reproduction use Python 3.10.12.
+numpy          == 1.26.4     ; python_version <  "3.11"
+numpy          >= 2.3, < 2.4 ; python_version >= "3.11"
+pandas         == 2.3.3
+matplotlib     == 3.10.9
+torch          == 2.11.0
+cvxpy          == 1.7.5
+cvxpylayers    == 0.1.9
+pin            == 3.9.0     # Pinocchio. Imported as "import pinocchio".
+                            # If the wheel fails: conda install -c conda-forge pinocchio
+pyyaml         == 6.0.3     # imported as "import yaml"
+
+# --- solver / numerical stack pulled in by cvxpy (pinned for reproducibility) ---
+osqp           == 1.1.1     # the QP solver used at evaluation time
+clarabel       == 0.11.1
+scs            == 3.2.11
+scipy          == 1.15.3# Python dependencies for the offline HOCBF gain-learning pipeline.
+# Target: Python 3.10.12
+#
+#   pip install -r requirements.txt
+#
+# Verified against every import in src/. No ROS 2 and no CasADi are needed:
+# all reported results come from the offline closed-loop simulator.
+#
+# Pinned to the versions used to produce the published tables. The solver stack
+# (osqp / clarabel / scs) and scipy are pinned as well, since QP-solver and
+# BLAS/LAPACK versions can slightly shift the reported numbers.
+
+# --- direct imports ---
+# numpy is pinned to 1.26.4 for the canonical Python 3.10.12 environment that
+# produced the published tables. On Python >= 3.11 that pin cannot resolve:
+# Pinocchio (pin==3.9.0) pulls in cmeel-boost, which requires numpy>=2.3 there.
+# The marker below lets 3.11+ install with numpy 2.3.x (best-effort -- NOT the
+# validated environment). For exact-digit reproduction use Python 3.10.12.
+numpy          == 1.26.4     ; python_version <  "3.11"
+numpy          >= 2.3, < 2.4 ; python_version >= "3.11"
 pandas         == 2.3.3
 matplotlib     == 3.10.9
 torch          == 2.11.0
