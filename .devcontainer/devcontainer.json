@@ -8,6 +8,9 @@
   // docker/reproduce_tables.sh work unchanged. Scenarios live at /data.
   "workspaceMount": "source=${localWorkspaceFolder},target=/repo,type=bind",
   "workspaceFolder": "/repo",
+  "mounts": [
+    "source=claude-code-config,target=/root/.claude,type=volume"
+  ],
   "containerEnv": {
     // reproduce_tables.sh writes here; out/ is gitignored
     "OUT": "/repo/out"
@@ -16,7 +19,8 @@
     "vscode": {
       "extensions": [
         "ms-python.python",
-        "ms-python.vscode-pylance"
+        "ms-python.vscode-pylance",
+        "anthropic.claude-code"
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
