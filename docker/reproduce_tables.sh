@@ -26,7 +26,8 @@ else
 fi
 N=$(wc -l < "$OUT/shards/list.txt")
 (( JOBS > N )) && JOBS=$N
-split -n "l/$JOBS" -d -a 3 "$OUT/shards/list.txt" "$OUT/shards/part_"
+rm -f "$OUT"/shards/part_*
+split -n "l/$JOBS" -d -a 3 --additional-suffix=.txt "$OUT/shards/list.txt" "$OUT/shards/part_"
 echo "running $N scenarios x 4 modes in $JOBS shards (g12 pair scope: $G12_SCOPE)"
 
 # --- 2. run the four controllers --------------------------------------------
