@@ -29,6 +29,10 @@ src/*archive*/
 src/safe_candidates*/
 src/fr3_hardpool_v6_final/
 
+# Docker / dev-container reproduction outputs
+out/
+out_*/
+
 # Generated datasets / scenarios / rollouts (huge and/or regenerable)
 # NOTE / TRAP: this also ignores scenarios and zips placed under config/.
 # If you regenerate scenarios, do NOT expect to commit them from config/ —

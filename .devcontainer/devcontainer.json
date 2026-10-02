@@ -1,0 +1,28 @@
+{
+  "name": "fr3-hocbf",
+  "build": {
+    "dockerfile": "../Dockerfile",
+    "context": ".."
+  },
+  // Mount the repo at /repo (same path as the plain image) so scripts and
+  // docker/reproduce_tables.sh work unchanged. Scenarios live at /data.
+  "workspaceMount": "source=${localWorkspaceFolder},target=/repo,type=bind",
+  "workspaceFolder": "/repo",
+  "containerEnv": {
+    // reproduce_tables.sh writes here; out/ is gitignored
+    "OUT": "/repo/out"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ],
+      "settings": {
+        "python.defaultInterpreterPath": "/usr/local/bin/python",
+        "python.analysis.extraPaths": ["/repo/src"],
+        "terminal.integrated.cwd": "/repo/src"
+      }
+    }
+  }
+}
