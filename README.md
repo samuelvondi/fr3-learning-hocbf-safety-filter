@@ -133,14 +133,43 @@ different statistic (48.8% for Fixed + Fallback, 1.4% for NN + Fallback).
 
 ## 2. Requirements
 
-Python 3.10.x, target **3.10.12** — the environment that produced the published
-tables. The lower bound comes from `list[str]` / `X | None` syntax (needs
-≥ 3.10); the upper bound comes from the pinned `numpy == 1.26.4`, which on
-Python ≥ 3.11 conflicts with Pinocchio's `cmeel-boost` (it requires
-`numpy >= 2.3`). `requirements.txt` carries an environment marker so 3.11+ still
-installs (with numpy 2.3.x), but that path is best-effort and not the validated
-environment; for exact reproduction use Python 3.10.12. A clean interpreter is
-easiest via conda:
+### Docker (recommended)
+
+The `Dockerfile` pins Python 3.10.12 with CPU-only torch and unpacks the
+evaluation scenarios at build time. Building runs no simulation.
+
+```bash
+docker build -t fr3-hocbf .
+# smoke test: first 20 benchmark scenarios
+docker run --rm -e LIMIT=20 -v "$PWD/out_smoke:/out" fr3-hocbf /repo/docker/reproduce_tables.sh
+# full run: Tables I-III + Fig. 4 into ./out (shards across all cores)
+docker run --rm -v "$PWD/out:/out" fr3-hocbf /repo/docker/reproduce_tables.sh
+```
+
+`docker/reproduce_tables.sh` runs §1 steps 3+ in parallel shards (`JOBS`,
+default `nproc`), merges them, and writes `table1.txt`, the Table II–III files
+and the Fig. 4 plots. `LIMIT` restricts it to the first N benchmark scenarios,
+and `G12_SCOPE` sets `--g12-fallback-pair-scope` (default `obstacle`). The
+image unpacks the evaluation scenarios to `/data/generated_scenarios/` and the
+benchmark list to `/data/pd_failed_460.txt`.
+
+**Dev container (for development).** `.devcontainer/devcontainer.json` reuses
+the same `Dockerfile`. In VS Code run *Dev Containers: Reopen in Container*;
+the repo is mounted live at `/repo`, so code edits need no rebuild. From the
+integrated terminal, `bash /repo/docker/reproduce_tables.sh` writes to
+`/repo/out/`. Rebuild the container only after changing `Dockerfile` or
+`requirements.txt`.
+
+### Local install
+
+Python 3.10.x, target **3.10.12** — the Python version that produced the
+published tables. The lower bound comes from `list[str]` / `X | None` syntax
+(needs ≥ 3.10). numpy is dictated by Pinocchio: `pin == 3.9.0` requires
+`cmeel-boost ~= 1.89.0`, whose wheels require `numpy >= 2.2, < 2.3` on Python
+3.10 and `numpy >= 2.3, < 2.4` on 3.11+. The original machine likely had
+numpy 1.26.4 with a non-pip Pinocchio; that combination is not installable via
+pip, so tiny numerical differences near `min_h ≈ 0` are possible. A clean
+interpreter is easiest via conda:
 
 ```bash
 conda create -n fr3 python=3.10 && conda activate fr3
