@@ -350,8 +350,6 @@ def davide_online_p12_current(
         if hi > EPSILON_DENOMINATOR:
             gamma_needed = -float(lfi) / float(hi)
             max_gamma_required = max(max_gamma_required, gamma_needed)
-        elif hi < -EPSILON_DENOMINATOR:
-            max_gamma_required = GAMMA_MAX_LIMIT
 
     gamma = float(initial_gamma)
     if max_gamma_required > -float("inf"):
@@ -371,8 +369,6 @@ def davide_online_p12_current(
         if psii > EPSILON_DENOMINATOR:
             beta_needed = -S_sup / float(psii)
             max_beta_required = max(max_beta_required, beta_needed)
-        elif psii < -EPSILON_DENOMINATOR:
-            max_beta_required = BETA_MAX_LIMIT
 
     beta = float(initial_beta)
     if max_beta_required > -float("inf"):
@@ -413,24 +409,46 @@ def min_g1_current(all_pair_terms: dict, p1: float, pair_scope: str) -> float:
     return float(np.min(g1_all[active]))
 
 
-def min_g2_margin_current(
-    ddq: np.ndarray,
-    A_full: np.ndarray,
-    b_full: np.ndarray,
-    mask_full: np.ndarray,
+def g12_check_current(
+    q_arm: np.ndarray,
+    dq_arm: np.ndarray,
+    all_pair_terms: dict,
+    limits: dict,
+    dt: float,
+    p1: float,
+    p2: float,
     pair_scope: str,
-) -> float:
+) -> tuple[float, float]:
     """
-    Current-step G2 diagnostic: signed HOCBF pair-row QP margin.
+    Pre-QP analytic feasibility check of candidate p1,p2 (paper Sec. II-D).
 
-    margin >= 0 means the selected acceleration satisfies the active pair row.
+    G1 over active pairs with h > 0:
+        G1 = Lf_h + p1*h
+    G2 over active pairs with psi > 0, using the largest contribution the
+    bounded input can make (S_sup = sup_{u in U} Lg_psi u):
+        G2 = Lf_psi + S_sup + p2*psi
+
+    Returns (min G1, min G2); nan if no pair qualifies. A negative value means
+    p1 resp. p2 is too small and the fallback has to repair it.
     """
-    pair_active = np.asarray(mask_full[:NUM_PAIR_ROWS], dtype=float) > 0.5
-    scoped = pair_scope_mask(pair_active.astype(float), pair_scope)
-    if not np.any(scoped):
-        return float("nan")
-    qp_margin = np.asarray(A_full, dtype=float) @ np.asarray(ddq, dtype=float).reshape(NUM_ARM_JOINTS) - np.asarray(b_full, dtype=float)
-    return float(np.min(qp_margin[:NUM_PAIR_ROWS][scoped]))
+    h_all = np.asarray(all_pair_terms["h_all"], dtype=float).reshape(NUM_PAIR_ROWS)
+    Lf_h_all = np.asarray(all_pair_terms["Lf_h_all"], dtype=float).reshape(NUM_PAIR_ROWS)
+    vrel_sq2_all = np.asarray(all_pair_terms["vrel_sq2_all"], dtype=float).reshape(NUM_PAIR_ROWS)
+    Lg_psi_all = np.asarray(all_pair_terms["Lg_psi_all"], dtype=float).reshape(NUM_PAIR_ROWS, NUM_ARM_JOINTS)
+    active = pair_scope_mask(all_pair_terms["pair_mask"], pair_scope)
+
+    psi_all = Lf_h_all + float(p1) * h_all
+    g1_rows = active & (h_all > EPSILON_DENOMINATOR)
+    min_g1 = float(np.min(psi_all[g1_rows])) if np.any(g1_rows) else float("nan")
+
+    ddq_min_kin, ddq_max_kin = kinematic_ddq_bounds(q_arm, dq_arm, limits, dt)
+    Lf_psi_all = vrel_sq2_all + float(p1) * Lf_h_all
+    S_sup_all = np.sum(np.where(Lg_psi_all >= 0.0, Lg_psi_all * ddq_max_kin, Lg_psi_all * ddq_min_kin), axis=1)
+    g2_all = Lf_psi_all + S_sup_all + float(p2) * psi_all
+    g2_rows = active & (psi_all > EPSILON_DENOMINATOR)
+    min_g2 = float(np.min(g2_all[g2_rows])) if np.any(g2_rows) else float("nan")
+
+    return min_g1, min_g2
 
 
 def g12_values_hold(min_g1: float, min_g2: float, tol: float) -> bool:
@@ -490,9 +508,8 @@ def minimal_g12_p12_current(
         if hi > EPSILON_DENOMINATOR:
             gamma_needed = -float(lfi) / float(hi)
             max_gamma_required = max(max_gamma_required, gamma_needed)
-        elif hi < -EPSILON_DENOMINATOR:
-            # Already geometrically unsafe. No finite p1 can fix h at this instant.
-            max_gamma_required = GAMMA_MAX_LIMIT
+        # h <= 0: already in collision. Raising p1 only makes psi more
+        # negative and the QP row harder, so such pairs are skipped (eq. 21).
 
     if max_gamma_required > -float("inf"):
         gamma = max(float(p1_floor), max(0.0, max_gamma_required + GAMMA_ADJUST_BUFFER))
@@ -513,9 +530,8 @@ def minimal_g12_p12_current(
         if psii > EPSILON_DENOMINATOR:
             beta_needed = -S_sup / float(psii)
             max_beta_required = max(max_beta_required, beta_needed)
-        elif psii < -EPSILON_DENOMINATOR:
-            # Already G1-unsafe. No finite p2 can fix negative psi in G2.
-            max_beta_required = BETA_MAX_LIMIT
+        # psi <= 0: raising p2 only tightens the QP row, so such pairs are
+        # skipped (eq. 23).
 
     if max_beta_required > -float("inf"):
         beta = max(float(p2_floor), max(0.0, max_beta_required + BETA_ADJUST_BUFFER))
@@ -679,9 +695,6 @@ def rollout_one_policy(
         p2_fallback = float("nan")
         min_g1_candidate = float("nan")
         min_g2_candidate = float("nan")
-        candidate_qp_solved = False
-        candidate_qp_status = ""
-        already_solved = False
 
         if mode == "original":
             p1 = initial_gamma
@@ -719,71 +732,30 @@ def rollout_one_policy(
             p2_nn = float(p2)
 
             if mode == "nn_g12_fallback" and args.nn_g12_fallback:
-                min_g1_candidate = min_g1_current(
-                    all_pair_terms=all_pair_terms,
-                    p1=p1,
-                    pair_scope=args.g12_fallback_pair_scope,
-                )
-                (
-                    u_nom_cand,
-                    A_full_cand,
-                    b_full_cand,
-                    mask_full_cand,
-                    ddq_safe_cand,
-                    qp_solved_cand,
-                    qp_status_cand,
-                    solve_time_cand,
-                ) = build_and_solve_hard_qp_for_p12(
+                # Analytic pre-QP check of the NN gains (paper Sec. II-D).
+                min_g1_candidate, min_g2_candidate = g12_check_current(
                     q_arm=q_arm,
                     dq_arm=dq_arm,
-                    ddq_nominal=ddq_nominal,
                     all_pair_terms=all_pair_terms,
-                    joint_limits=joint_limits,
+                    limits=joint_limits,
+                    dt=dt,
                     p1=p1,
                     p2=p2,
-                    dt=dt,
-                    eps_abs=args.eps_abs,
-                    eps_rel=args.eps_rel,
-                    max_iter=args.max_iter,
+                    pair_scope=args.g12_fallback_pair_scope,
                 )
-                candidate_qp_solved = bool(qp_solved_cand)
-                candidate_qp_status = str(qp_status_cand)
-                if qp_solved_cand:
-                    min_g2_candidate = min_g2_margin_current(
-                        ddq=ddq_safe_cand,
-                        A_full=A_full_cand,
-                        b_full=b_full_cand,
-                        mask_full=mask_full_cand,
-                        pair_scope=args.g12_fallback_pair_scope,
-                    )
-
-                nn_holds = bool(qp_solved_cand) and g12_values_hold(
+                nn_holds = g12_values_hold(
                     min_g1=min_g1_candidate,
                     min_g2=min_g2_candidate,
                     tol=args.g12_fallback_tol,
                 )
 
-                if nn_holds:
-                    u_nom = u_nom_cand
-                    A_full = A_full_cand
-                    b_full = b_full_cand
-                    mask_full = mask_full_cand
-                    ddq_safe = ddq_safe_cand
-                    qp_solved = qp_solved_cand
-                    qp_status = qp_status_cand
-                    solve_time_s = solve_time_cand
-                    already_solved = True
-                else:
+                if not nn_holds:
                     fallback_used = True
                     fallback_count += 1
-                    if not qp_solved_cand:
-                        fallback_reason = "candidate_qp_failed"
-                    elif np.isfinite(min_g1_candidate) and min_g1_candidate < -float(args.g12_fallback_tol):
+                    if np.isfinite(min_g1_candidate) and min_g1_candidate < -float(args.g12_fallback_tol):
                         fallback_reason = "G1_negative"
-                    elif np.isfinite(min_g2_candidate) and min_g2_candidate < -float(args.g12_fallback_tol):
-                        fallback_reason = "G2_negative"
                     else:
-                        fallback_reason = "G12_monitor_failed"
+                        fallback_reason = "G2_sup_negative"
 
                     # Independent fallback: compute minimal current-state p1,p2
                     # from G1/G2, without using scenario gamma/beta as floors.
@@ -804,29 +776,28 @@ def rollout_one_policy(
         else:
             raise ValueError(f"Unknown mode: {mode}")
 
-        if not already_solved:
-            (
-                u_nom,
-                A_full,
-                b_full,
-                mask_full,
-                ddq_safe,
-                qp_solved,
-                qp_status,
-                solve_time_s,
-            ) = build_and_solve_hard_qp_for_p12(
-                q_arm=q_arm,
-                dq_arm=dq_arm,
-                ddq_nominal=ddq_nominal,
-                all_pair_terms=all_pair_terms,
-                joint_limits=joint_limits,
-                p1=p1,
-                p2=p2,
-                dt=dt,
-                eps_abs=args.eps_abs,
-                eps_rel=args.eps_rel,
-                max_iter=args.max_iter,
-            )
+        (
+            u_nom,
+            A_full,
+            b_full,
+            mask_full,
+            ddq_safe,
+            qp_solved,
+            qp_status,
+            solve_time_s,
+        ) = build_and_solve_hard_qp_for_p12(
+            q_arm=q_arm,
+            dq_arm=dq_arm,
+            ddq_nominal=ddq_nominal,
+            all_pair_terms=all_pair_terms,
+            joint_limits=joint_limits,
+            p1=p1,
+            p2=p2,
+            dt=dt,
+            eps_abs=args.eps_abs,
+            eps_rel=args.eps_rel,
+            max_iter=args.max_iter,
+        )
 
         if qp_solved:
             hard_viol, min_qp_margin = hard_violation_numpy(ddq_safe, A_full, b_full)
@@ -937,8 +908,6 @@ def rollout_one_policy(
                 "p2_fallback": p2_fallback,
                 "fallback_used": bool(fallback_used),
                 "fallback_reason": fallback_reason,
-                "candidate_qp_solved": bool(candidate_qp_solved),
-                "candidate_qp_status": candidate_qp_status,
                 "min_g1_candidate": min_g1_candidate,
                 "min_g2_candidate": min_g2_candidate,
                 "max_gamma_required": max_gamma_required,
