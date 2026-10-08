@@ -40,7 +40,7 @@ Main metrics:
   5. Runtime / p12
      - QP solve time: mean / p95 / max in ms
      - total step time: mean / p95 / max in ms
-     - mean p1 / p2 across scenarios
+     - mean p1 / p2 over all logged control steps
 
 Progress-score logic:
   1. use summary column progress_score/progress if present
@@ -387,6 +387,7 @@ def build_tables(
     for method in method_order:
         sdf = summary_df[summary_df["method"].astype(str) == method].copy()
         stp_runtime = runtime_steps[runtime_steps["method"].astype(str) == method].copy()
+        stp_all = steps_df[steps_df["method"].astype(str) == method]
         short = short_methods.get(method, method)
 
         n = len(sdf)
@@ -491,8 +492,9 @@ def build_tables(
             if "step_elapsed_s" in stp_runtime.columns
             else "--"
         )
-        mean_p1 = mean_value(safe_numeric(sdf, "p1_mean"), decimals=3)
-        mean_p2 = mean_value(safe_numeric(sdf, "p2_mean"), decimals=3)
+        # Mean applied gains over all logged control steps (not per-scenario means).
+        mean_p1 = mean_value(safe_numeric(stp_all, "p1"), decimals=3)
+        mean_p2 = mean_value(safe_numeric(stp_all, "p2"), decimals=3)
 
         runtime_p12_rows.append([
             short,
@@ -564,8 +566,8 @@ def build_tables(
             "offline_total_step_max_ms": 1000.0 * float(pd.to_numeric(
                 stp_runtime.get("step_elapsed_s", pd.Series(dtype=float)), errors="coerce"
             ).max()),
-            "mean_p1_across_scenarios": float(safe_numeric(sdf, "p1_mean").mean()),
-            "mean_p2_across_scenarios": float(safe_numeric(sdf, "p2_mean").mean()),
+            "mean_p1_all_steps": float(safe_numeric(stp_all, "p1").mean()),
+            "mean_p2_all_steps": float(safe_numeric(stp_all, "p2").mean()),
         })
 
     rows = {

@@ -72,12 +72,16 @@ print(f"{'':14s} {'S/succ':>6s} {'U/succ':>6s} {'S/fail':>6s} {'U/fail':>6s}   v
 for m, label in [("fixed", "Fixed g/b"), ("davide_online", "Fixed + FB"),
                  ("nn", "Learned (NN)"), ("nn_g12_fallback", "NN + Fallback")]:
     s = d[d["mode"] == m]
+    # Fallback rate and mean gains over all control steps, not per-scenario means.
+    n = s.steps.sum()
+    fb = s.fallback_count.sum() / n
+    g, b = (s.p1_mean * s.steps).sum() / n, (s.p2_mean * s.steps).sum() / n
     print(f"{label:14s} {100*( s.success & ~s.unsafe).mean():6.1f} "
           f"{100*( s.success &  s.unsafe).mean():6.1f} "
           f"{100*(~s.success & ~s.unsafe).mean():6.1f} "
           f"{100*(~s.success &  s.unsafe).mean():6.1f}   "
-          f"{100*s.unsafe.mean():5.1f}  {100*s.fallback_rate.mean():5.1f}  "
-          f"{s.p1_mean.mean():.1f}/{s.p2_mean.mean():.1f}")
+          f"{100*s.unsafe.mean():5.1f}  {100*fb:5.1f}  "
+          f"{g:.1f}/{b:.1f}")
 PY
 
 # --- 5. Tables II-III and Fig. 4 --------------------------------------------

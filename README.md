@@ -63,13 +63,17 @@ d["unsafe"]  = pd.to_numeric(d["min_h"], errors="coerce") < -TOL
 for m, label in [("fixed", "Fixed g/b"), ("davide_online", "Fixed + FB"),
                  ("nn", "Learned (NN)"), ("nn_g12_fallback", "NN + Fallback")]:
     s = d[d["mode"] == m]
+    # Fallback rate and mean gains over all control steps, not per-scenario means.
+    n = s.steps.sum()
+    fb = s.fallback_count.sum() / n
+    g, b = (s.p1_mean * s.steps).sum() / n, (s.p2_mean * s.steps).sum() / n
     print(f"{label:14s} {100*( s.success & ~s.unsafe).mean():5.1f} "
           f"{100*( s.success &  s.unsafe).mean():5.1f} "
           f"{100*(~s.success & ~s.unsafe).mean():5.1f} "
           f"{100*(~s.success &  s.unsafe).mean():5.1f}   "
           f"viol {100*s.unsafe.mean():5.1f}   "
-          f"FB {100*s.fallback_rate.mean():5.1f}   "
-          f"g/b {s.p1_mean.mean():.1f}/{s.p2_mean.mean():.1f}")
+          f"FB {100*fb:5.1f}   "
+          f"g/b {g:.1f}/{b:.1f}")
 PY
 ```
 
@@ -131,9 +135,11 @@ The `fixed` and `davide_online` rows come from
 contain a `davide_online` mode from differently configured runs — the
 `davide_fixed` file is canonical for that row.
 
-Table II's fallback-activation column reports the mean of each scenario's own
-elevation fraction (18.4% for Fixed + Fallback). The global step fraction is a
-different statistic (48.8% for Fixed + Fallback, 1.4% for NN + Fallback).
+The fallback rate and γ̄/β̄ are now computed over all control steps together
+(total fallback steps / total steps; gains averaged over every step). The
+published Table II mixed definitions: Fixed + Fallback used per-scenario means
+(18.4%, γ̄/β̄ 32.1/42.6; over all steps 48.8%, 85.3/109.5), NN + Fallback the
+all-steps rate (1.4%; per-scenario 1.9%) with per-scenario γ̄/β̄.
 
 ---
 
