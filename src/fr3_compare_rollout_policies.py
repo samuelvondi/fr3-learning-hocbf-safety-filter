@@ -456,6 +456,9 @@ def minimal_g12_p12_current(
     This deliberately does NOT use the scenario YAML gamma/beta values as a
     baseline/floor. It computes the smallest current-state gains suggested by
     the G1/G2 inequalities, then clips them to the same caps used elsewhere.
+    The NN fallback passes the NN proposal as p1_floor/p2_floor, which gives
+    final = max(NN, required). psi is evaluated with the floored gamma, so 
+    beta is solved against gamma_final.
 
     G1 condition:
         G1 = Lf_h + p1*h >= 0
@@ -784,14 +787,16 @@ def rollout_one_policy(
 
                     # Independent fallback: compute minimal current-state p1,p2
                     # from G1/G2, without using scenario gamma/beta as floors.
+                    p1_floor = max(float(args.g12_fallback_p1_floor), p1_nn)
+                    p2_floor = max(float(args.g12_fallback_p2_floor), p2_nn)
                     p1, p2, max_gamma_required, max_beta_required = minimal_g12_p12_current(
                         q_arm=q_arm,
                         dq_arm=dq_arm,
                         all_pair_terms=all_pair_terms,
                         limits=joint_limits,
                         dt=dt,
-                        p1_floor=args.g12_fallback_p1_floor,
-                        p2_floor=args.g12_fallback_p2_floor,
+                        p1_floor=p1_floor,
+                        p2_floor=p2_floor,
                         pair_scope=args.g12_fallback_pair_scope,
                     )
                     p1_fallback = float(p1)
