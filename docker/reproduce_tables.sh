@@ -93,3 +93,4 @@ python fr3_plot_compare_results.py \
   --out-dir "$OUT/fr3_compare_plots" --h-tol 1e-4
 
 echo "done -> $OUT"
+printf 'total time: %dh %02dm %02ds\n' $((SECONDS / 3600)) $((SECONDS % 3600 / 60)) $((SECONDS % 60))
