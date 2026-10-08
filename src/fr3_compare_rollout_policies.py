@@ -320,30 +320,25 @@ def davide_online_p12_current(
     dt: float,
     initial_gamma: float,
     initial_beta: float,
-    pair_scope: str = "obstacle",
+    pair_scope: str = "all",
 ) -> tuple[float, float, float, float]:
     """
     Single-step Davide-style dynamic gamma/beta calculation.
 
     This mirrors the two-pass logic:
       gamma from -Lf_h/h, then beta from -S_sup/psi.
+    Only active pairs (below the activation threshold) are considered.
     """
     h_all = np.asarray(all_pair_terms["h_all"], dtype=float)
     Lf_h_all = np.asarray(all_pair_terms["Lf_h_all"], dtype=float)
     vrel_sq2_all = np.asarray(all_pair_terms["vrel_sq2_all"], dtype=float)
     Lg_psi_all = np.asarray(all_pair_terms["Lg_psi_all"], dtype=float)
+    active = pair_scope_mask(all_pair_terms["pair_mask"], pair_scope)
 
-    if pair_scope == "obstacle":
-        row_slice = slice(0, NUM_ROBOT_OBSTACLE_ROWS)
-    elif pair_scope == "all":
-        row_slice = slice(0, NUM_PAIR_ROWS)
-    else:
-        raise ValueError(f"Unknown pair_scope: {pair_scope}")
-
-    h = h_all[row_slice]
-    Lf_h = Lf_h_all[row_slice]
-    vrel_sq2 = vrel_sq2_all[row_slice]
-    Lg = Lg_psi_all[row_slice, :]
+    h = h_all[active]
+    Lf_h = Lf_h_all[active]
+    vrel_sq2 = vrel_sq2_all[active]
+    Lg = Lg_psi_all[active, :]
 
     max_gamma_required = -float("inf")
     for hi, lfi in zip(h, Lf_h):
@@ -713,6 +708,10 @@ def rollout_one_policy(
                 initial_beta=initial_beta,
                 pair_scope=args.online_pair_scope,
             )
+            if p1 > initial_gamma or p2 > initial_beta:
+                fallback_used = True
+                fallback_count += 1
+                fallback_reason = "G1_raised" if p1 > initial_gamma else "G2_sup_raised"
         elif mode in ("nn", "nn_g12_fallback"):
             if nn_pack is None:
                 raise RuntimeError("NN modes require --model")
@@ -824,22 +823,11 @@ def rollout_one_policy(
             next_q_arm = q_arm + dq_arm * dt + 0.5 * ddq_safe * (dt ** 2)
 
         else:
-            # Davide-style emergency hold would normally keep the previous known state.
-            # For final offline evaluation, optionally terminate here so post-failure
-            # frozen-tail metrics do not contaminate h/G1/G2/path/jerk statistics.
+            # Infeasible hard QP: terminate immediately, no recovery hold
+            # (paper Sec. III-C).
             qp_fail_count += 1
-            hard_viol = float("nan")
-            min_qp_margin = float("nan")
-            min_g2 = float("nan")
-            min_bound_margin = float("nan")
-
-            ddq_safe = np.zeros(NUM_ARM_JOINTS, dtype=float)
-            next_dq_arm = dq_arm.copy()
-            next_q_arm = q_arm.copy()
-
-            if args.terminate_on_qp_fail:
-                final_status = "QP_FAIL"
-                break
+            final_status = "QP_FAIL"
+            break
 
         next_q_full = q_full.copy()
         next_dq_full = dq_full.copy()
@@ -1080,7 +1068,12 @@ def main():
     parser.add_argument("--p1-floor", type=float, default=1e-3)
     parser.add_argument("--p2-floor", type=float, default=1e-3)
 
-    parser.add_argument("--online-pair-scope", choices=["obstacle", "all"], default="obstacle")
+    parser.add_argument(
+        "--online-pair-scope",
+        choices=["obstacle", "all"],
+        default="all",
+        help="Pair rows used by the Davide online (Fixed + Fallback) gain update.",
+    )
     parser.add_argument(
         "--nn-g12-fallback",
         action=argparse.BooleanOptionalAction,
@@ -1117,16 +1110,6 @@ def main():
                         help="Maximum p1/gamma used by Davide online and G12 fallback.")
     parser.add_argument("--p2-max", type=float, default=250.0,
                         help="Maximum p2/beta used by Davide online and G12 fallback.")
-
-    parser.add_argument(
-
-        "--terminate-on-qp-fail",
-
-        action="store_true",
-
-        help="Stop rollout immediately at first hard-QP failure instead of continuing with the emergency hold tail.",
-
-    )
 
     args = parser.parse_args()
 

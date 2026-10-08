@@ -104,8 +104,14 @@ python fr3_plot_compare_results.py \
   no `--scenario-root` flag.
 - **No `--stats` argument is needed** — the checkpoint embeds `feat_mean` / `feat_std`.
 - **Run scripts from inside `src/`** — the pipeline uses flat local imports.
-- **Pair scope.** The published runs used the code defaults
-  (`--online-pair-scope obstacle`, `--g12-fallback-pair-scope obstacle`).
+- **Fallback and termination paper (Sec. II-D, III-C).** Both
+  fallbacks check and repair all active pairs (robot–obstacle and
+  self-collision), using the analytic pre-QP check of eqs. (21)–(24), and a
+  rollout stops at the first infeasible hard QP. The published runs used an
+  earlier version (robot–obstacle pairs only, NN + Fallback checked after a
+  candidate QP solve), so the numbers below no longer reproduce exactly.
+  `--online-pair-scope obstacle --g12-fallback-pair-scope obstacle` restores
+  the robot–obstacle-only scope (default `all`).
 
 ### Verified against the paper
 
@@ -148,8 +154,7 @@ docker run --rm -v "$PWD/out:/out" fr3-hocbf /repo/docker/reproduce_tables.sh
 
 `docker/reproduce_tables.sh` runs §1 steps 3+ in parallel shards (`JOBS`,
 default `nproc`), merges them, and writes `table1.txt`, the Table II–III files
-and the Fig. 4 plots. `LIMIT` restricts it to the first N benchmark scenarios,
-and `G12_SCOPE` sets `--g12-fallback-pair-scope` (default `obstacle`). The
+and the Fig. 4 plots. `LIMIT` restricts it to the first N benchmark scenarios. The
 image unpacks the evaluation scenarios to `/data/generated_scenarios/` and the
 benchmark list to `/data/pd_failed_460.txt`.
 

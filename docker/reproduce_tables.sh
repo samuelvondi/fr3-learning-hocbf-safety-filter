@@ -4,12 +4,10 @@
 # Environment overrides:
 #   JOBS        parallel shards (default: nproc)
 #   LIMIT       only run the first N benchmark scenarios (smoke test)
-#   G12_SCOPE   --g12-fallback-pair-scope (default: obstacle, as stated in README)
 #   OUT         output directory (default: /out)
 set -euo pipefail
 
 JOBS="${JOBS:-$(nproc)}"
-G12_SCOPE="${G12_SCOPE:-obstacle}"
 OUT="${OUT:-/out}"
 LIST=/data/pd_failed_460.txt
 MODEL=/repo/artifacts/checkpoints/epoch_0022_v10_fullpool_g300.pt
@@ -28,7 +26,7 @@ N=$(wc -l < "$OUT/shards/list.txt")
 (( JOBS > N )) && JOBS=$N
 rm -f "$OUT"/shards/part_*
 split -n "l/$JOBS" -d -a 3 --additional-suffix=.txt "$OUT/shards/list.txt" "$OUT/shards/part_"
-echo "running $N scenarios x 4 modes in $JOBS shards (g12 pair scope: $G12_SCOPE)"
+echo "running $N scenarios x 4 modes in $JOBS shards"
 
 # --- 2. run the four controllers --------------------------------------------
 # One thread per process: the shards already saturate the cores.
@@ -39,7 +37,6 @@ for part in "$OUT"/shards/part_*; do
     python fr3_compare_rollout_policies.py "$part" \
         --modes fixed,davide_online,nn,nn_g12_fallback \
         --p1-fixed 10.0 --p2-fixed 15.0 \
-        --g12-fallback-pair-scope "$G12_SCOPE" \
         --model "$MODEL" \
         --out-prefix "$part" > "$part.log" 2>&1 &
     pids+=($!)
