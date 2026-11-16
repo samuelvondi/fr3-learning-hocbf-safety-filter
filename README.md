@@ -186,7 +186,8 @@ interpreter is easiest via conda:
 conda create -n fr3 python=3.10 && conda activate fr3
 ```
 
-CPU is sufficient; a GPU speeds up training only.
+CPU is sufficient, and a GPU does not speed up training either: it is single-core bound
+(batch size 1, float64, CPU-only QP solver). See `docs/per_pair_beta_findings.md` §4.
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
