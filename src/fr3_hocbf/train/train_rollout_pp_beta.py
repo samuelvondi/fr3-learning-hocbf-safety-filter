@@ -62,9 +62,8 @@ from fr3_hocbf.differentiable.qp_layer import (
     pair_violation_batch,
     solve_bound_slack_qp_batch,
 )
+from fr3_hocbf.train.config import DT_DEFAULT, RolloutTrainCfg
 from fr3_hocbf.train.train_rollout import (
-    DT_DEFAULT,
-    RolloutTrainCfg,
     aggregate_stats,
     clone_obstacles_torch,
     compute_nominal_detached,

@@ -22,7 +22,7 @@ import torch
 from fr3_hocbf.policy.pp_beta import PP_FEATURE_NAMES, kinematic_ddq_bounds_torch, pp_features_torch
 from fr3_hocbf.sim.qp_data import get_joint_limits
 from fr3_hocbf.dataset.rollout_records import expand_labeled_rollout_inputs
-from fr3_hocbf.train.train_rollout import DT_DEFAULT
+from fr3_hocbf.train.config import DT_DEFAULT
 
 
 def main():
