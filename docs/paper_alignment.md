@@ -2,7 +2,7 @@
 
 Status: 2026-10-08, branch `dev` up to commit `763fd02`.
 
-This note records how the evaluation code (`src/fr3_compare_rollout_policies.py`
+This note records how the evaluation code (`src/fr3_hocbf/evaluation/compare_rollout_policies.py`
 and the reporting scripts) was changed to follow the method as described in the
 paper, what the re-run benchmark shows, and what this means for the paper text.
 
@@ -75,7 +75,7 @@ OUT=/repo/out_nnfb; mkdir -p $OUT
 split -n l/$(nproc) -d -a 3 --additional-suffix=.txt /data/pd_failed_460.txt $OUT/part_
 export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 for p in $OUT/part_*.txt; do
-  python fr3_compare_rollout_policies.py "$p" --modes nn_g12_fallback \
+  python -m fr3_hocbf.evaluation.compare_rollout_policies "$p" --modes nn_g12_fallback \
     --model ../artifacts/checkpoints/epoch_0022_v10_fullpool_g300.pt \
     --out-prefix "$p" > "$p.log" 2>&1 &
 done; wait

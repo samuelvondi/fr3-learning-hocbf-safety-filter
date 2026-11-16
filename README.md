@@ -42,7 +42,7 @@ PY
 
 # 3. Run the four controllers.
 cd src
-python fr3_compare_rollout_policies.py ../pd_failed_460.txt \
+python -m fr3_hocbf.evaluation.compare_rollout_policies ../pd_failed_460.txt \
   --modes fixed,davide_online,nn,nn_g12_fallback \
   --p1-fixed 10.0 --p2-fixed 15.0 \
   --model ../artifacts/checkpoints/epoch_0022_v10_fullpool_g300.pt \
@@ -80,14 +80,14 @@ PY
 **Tables II–III and Fig. 4** come from the two reporting scripts:
 
 ```bash
-python fr3_make_final_metric_tables_generic_fixed.py \
+python -m fr3_hocbf.evaluation.make_final_metric_tables \
   --run pd_failed_final_summary.csv pd_failed_final_steps.csv \
         "fixed=Fixed gamma/beta" "davide_online=Fixed + Fallback" \
         "nn=Learned (NN)" "nn_g12_fallback=NN + Fallback" \
   --order "Fixed gamma/beta" "Fixed + Fallback" "Learned (NN)" "NN + Fallback" \
   --safety-tol 1e-4 --out-prefix fr3_final_metric_tables
 
-python fr3_plot_compare_results.py \
+python -m fr3_hocbf.evaluation.plot_compare_results \
   --steps pd_failed_final_steps.csv --summary pd_failed_final_summary.csv \
   --out-dir fr3_compare_plots --h-tol 1e-4
 ```
@@ -241,13 +241,13 @@ unique and never duplicated; train/val overlap is 0.
 | Differentiable QP with bound slack (Eq. 18–19) | `fr3_hocbf/differentiable/qp_layer.py` |
 | Losses (Eq. 15–20) | `fr3_hocbf/train/train_rollout.py` |
 | Split before oversampling (Sec. II-C) | `fr3_hocbf/dataset/build_fullpool_split.py` |
-| Runtime fallback (Eq. 21–24) | `fr3_compare_rollout_policies.py` |
+| Runtime fallback (Eq. 21–24) | `fr3_hocbf/evaluation/compare_rollout_policies.py` |
 | Closed-loop rollout, 50 Hz (Sec. III-C) | `fr3_hocbf/sim/rollout.py` |
 | Nominal controller (Sec. III-B) | `fr3_hocbf/sim/nominal_controller.py` |
 | Scenario generation (Sec. III-D) | `fr3_hocbf/dataset/generate_candidate_scenarios.py` |
 | PD-failed subset, 460 (Sec. III-F) | `fr3_hocbf/dataset/run_pd_only_scenarios.py` |
-| Tables I–III | `fr3_make_final_metric_tables_generic_fixed.py` |
-| Fig. 4 | `fr3_plot_compare_results.py` |
+| Tables I–III | `fr3_hocbf/evaluation/make_final_metric_tables.py` |
+| Fig. 4 | `fr3_hocbf/evaluation/plot_compare_results.py` |
 | Appendix A kinematics / Jacobians | `fr3_hocbf/differentiable/kinematics.py` |
 
 ---
@@ -263,7 +263,7 @@ Only needed to retrain from scratch. To reproduce the published tables, use §1.
 | `fr3_hocbf/dataset/build_fullpool_split.py` | 14 | `SRC = Path("/home/simon/davide_fr3_ws/src/cbf_safety_filter")` → your repo root |
 | `artifacts/results/fr3_pd_only_all1000_failed_scenarios.txt` | all | absolute scenario paths — rewrite as in §1 step 2 |
 
-Docstring examples in `fr3_compare_rollout_policies.py` and
+Docstring examples in `fr3_hocbf/evaluation/compare_rollout_policies.py` and
 `fr3_hocbf/train/train_rollout.py` also show `~/davide_fr3_ws/...` paths; these are comments
 only and do not affect execution. The URDF is resolved relative to the repository
 root, so it needs no configuration.

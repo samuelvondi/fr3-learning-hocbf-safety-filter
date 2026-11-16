@@ -34,7 +34,7 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
 pids=()
 for part in "$OUT"/shards/part_*; do
     [[ "$part" == *.log ]] && continue
-    python fr3_compare_rollout_policies.py "$part" \
+    python -m fr3_hocbf.evaluation.compare_rollout_policies "$part" \
         --modes fixed,davide_online,nn,nn_g12_fallback \
         --p1-fixed 10.0 --p2-fixed 15.0 \
         --model "$MODEL" \
@@ -85,14 +85,14 @@ for m, label in [("fixed", "Fixed g/b"), ("davide_online", "Fixed + FB"),
 PY
 
 # --- 5. Tables II-III and Fig. 4 --------------------------------------------
-python fr3_make_final_metric_tables_generic_fixed.py \
+python -m fr3_hocbf.evaluation.make_final_metric_tables \
   --run "${PREFIX}_summary.csv" "${PREFIX}_steps.csv" \
         "fixed=Fixed gamma/beta" "davide_online=Fixed + Fallback" \
         "nn=Learned (NN)" "nn_g12_fallback=NN + Fallback" \
   --order "Fixed gamma/beta" "Fixed + Fallback" "Learned (NN)" "NN + Fallback" \
   --safety-tol 1e-4 --out-prefix "$OUT/fr3_final_metric_tables"
 
-python fr3_plot_compare_results.py \
+python -m fr3_hocbf.evaluation.plot_compare_results \
   --steps "${PREFIX}_steps.csv" --summary "${PREFIX}_summary.csv" \
   --out-dir "$OUT/fr3_compare_plots" --h-tol 1e-4
 

@@ -25,14 +25,14 @@ Main things it shows:
     - aggregate summary plots across scenarios
 
 Example:
-    python fr3_plot_compare_results.py \
+    python -m fr3_hocbf.evaluation.plot_compare_results \
       --steps cmp_best_track_smoke_steps.csv \
       --summary cmp_best_track_smoke_summary.csv \
       --out-dir plots_cmp_best_track \
       --all-scenarios
 
 Single scenario:
-    python fr3_plot_compare_results.py \
+    python -m fr3_hocbf.evaluation.plot_compare_results \
       --steps cmp_best_track_smoke_steps.csv \
       --summary cmp_best_track_smoke_summary.csv \
       --scenario scenario_0000 \

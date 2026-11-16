@@ -5,7 +5,7 @@ from __future__ import annotations
 Generic FR3 final metric-table generator.
 
 Use this single script for any offline comparison result produced by
-fr3_compare_rollout_policies.py, as long as you have matching:
+fr3_hocbf/evaluation/compare_rollout_policies.py, as long as you have matching:
 
     <prefix>_summary.csv
     <prefix>_steps.csv
