@@ -68,7 +68,7 @@ from fr3_hocbf.sim.qp_data import (
     build_full_qp_numpy,
 )
 from fr3_hocbf.policy.p12_net import P12ParamNet
-from fr3_hocbf.train.train_rollout import normalize_features_numpy
+from fr3_hocbf.policy.features import normalize_features_numpy
 from fr3_hocbf.policy.pp_beta import PP_ARCH, load_pp_policy
 
 

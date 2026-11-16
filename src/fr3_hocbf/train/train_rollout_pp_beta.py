@@ -62,20 +62,16 @@ from fr3_hocbf.differentiable.qp_layer import (
 )
 from fr3_hocbf.train.train_rollout import (
     DT_DEFAULT,
-    INPUT_DIM,
     RolloutTrainCfg,
     aggregate_stats,
     build_bound_rows_torch,
-    build_feature_vector,
     build_scenario_map,
     clone_obstacles_torch,
     compute_nominal_detached,
     expand_labeled_rollout_inputs,
     guard_against_accidental_overwrite,
     is_safe_enough,
-    load_feature_stats,
     make_candidate_summary_row,
-    normalize_features_torch,
     obstacles_numpy_to_torch,
     safe_candidate_checkpoint_path,
     sample_start_state_from_rollout,
@@ -86,6 +82,7 @@ from fr3_hocbf.train.train_rollout import (
     violation_frequency_loss_from_sq,
     write_candidate_summaries,
 )
+from fr3_hocbf.policy.features import INPUT_DIM, build_feature_vector, load_feature_stats, normalize_features_torch
 from fr3_hocbf.policy.pp_beta import (
     PP_ARCH,
     PP_FEATURE_NAMES,
