@@ -23,7 +23,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from fr3_hocbf.sim.qp_data import NUM_ARM_JOINTS, NUM_PAIR_ROWS
+from fr3_hocbf.sim.qp_data import NUM_PAIR_ROWS
 
 NUM_ROBOT_OBSTACLE_ROWS = 40  # 8 active links * 5 obstacle slots; rows 40..42 are self-collision
 PP_FEATURE_NAMES = (
