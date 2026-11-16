@@ -37,7 +37,7 @@ The fallback fires if any pair fails either check. It then sets γ = max(γ_NN, 
 
 ### 3.1 Design
 
-- **Network** (`train/pp_beta.py`, `PerPairBetaNet`):
+- **Network** (`policy/pp_beta.py`, `PerPairBetaNet`):
   - The trunk is identical to P12ParamNet (114-D input with the published feature stats). It outputs a shared γ and a 64-D context.
   - The β head is a small MLP with weights shared across pairs, applied to each of the 43 pair rows. Its input is the context, 8 per-pair features (h, L_f h, v_rel², ψ, L_f ψ, S_sup, L_g ψ·u_nom, ‖L_g ψ‖, normalised with stats over active rows of the training rollouts), an activity bit, a pair-type one-hot (obstacle / self-collision) and an 8-D learned pair embedding.
   - Output: β_j = floor + (250 − floor)·sigmoid(·). 148k parameters, against 138k for the old network.

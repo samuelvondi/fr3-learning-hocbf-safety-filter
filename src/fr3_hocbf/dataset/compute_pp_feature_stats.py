@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 """
-Per-pair feature statistics for PerPairBetaNet (fr3_hocbf/train/pp_beta.py).
+Per-pair feature statistics for PerPairBetaNet (fr3_hocbf/policy/pp_beta.py).
 
 Mean/std of the 8 per-pair features over all ACTIVE pair rows of the training
 rollout NPZs. psi and Lf_psi need a gamma; the rollout's own per-step gamma is
@@ -19,7 +19,7 @@ import argparse
 import numpy as np
 import torch
 
-from fr3_hocbf.train.pp_beta import PP_FEATURE_NAMES, kinematic_ddq_bounds_torch, pp_features_torch
+from fr3_hocbf.policy.pp_beta import PP_FEATURE_NAMES, kinematic_ddq_bounds_torch, pp_features_torch
 from fr3_hocbf.sim.qp_data import get_joint_limits
 from fr3_hocbf.train.train_rollout import DT_DEFAULT, expand_labeled_rollout_inputs
 

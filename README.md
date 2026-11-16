@@ -240,7 +240,8 @@ All code is in the package `src/fr3_hocbf/`. Run every script from `src/` as a m
 | `sim/` | Numpy/Pinocchio simulation: capsule geometry, nominal controller, hard QP, closed-loop rollout |
 | `differentiable/` | Torch versions used in training: kinematics (+ fast analytic Jacobians), pair geometry, bound-slack QP layer |
 | `dataset/` | Scenario generation, rollout datasets, PD-only benchmark, split, feature statistics |
-| `train/` | Gain policies and differentiable-rollout training (shared gains; per-pair β, see `docs/per_pair_beta_findings.md`) |
+| `policy/` | Gain networks: shared γ/β (`p12_net.py`) and per-pair β (`pp_beta.py`, see `docs/per_pair_beta_findings.md`) |
+| `train/` | Differentiable-rollout training |
 | `evaluation/` | Controller comparison, Tables I–III, Fig. 4, per-pair β report |
 | `legacy/` | Superseded split scripts from the earlier good_200 pipeline, not used below |
 

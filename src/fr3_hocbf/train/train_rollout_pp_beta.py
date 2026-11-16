@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 """
-Rollout training for the per-pair beta policy (PerPairBetaNet, fr3_hocbf/train/pp_beta.py).
+Rollout training for the per-pair beta policy (PerPairBetaNet, fr3_hocbf/policy/pp_beta.py).
 
 Same differentiable bound-slack QP rollout, scenarios, losses, hyperparameters
 and checkpoint gate as fr3_hocbf/train/train_rollout.py. The only differences:
@@ -86,7 +86,7 @@ from fr3_hocbf.train.train_rollout import (
     violation_frequency_loss_from_sq,
     write_candidate_summaries,
 )
-from fr3_hocbf.train.pp_beta import (
+from fr3_hocbf.policy.pp_beta import (
     PP_ARCH,
     PP_FEATURE_NAMES,
     PerPairBetaNet,
