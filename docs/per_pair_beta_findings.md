@@ -12,7 +12,7 @@ Work from 2026-11-15/16 on branch `dev`. Independent of the paper notes in `pape
 
 ## 2. The runtime fallback: what G1 and G2 really do
 
-For each active pair j with the NN gains γ, β (`evaluation/compare_rollout_policies.py`, `g12_check_current`):
+For each active pair j with the NN gains γ, β (`evaluation/gain_policies.py`, `g12_check_current`):
 
 - **G1** (pairs with h_j > 0): ψ_j = L_f h_j + γ h_j ≥ 0. It fails when the pair approaches too fast for its distance. Only raising γ repairs it.
 - **G2** (pairs with ψ_j > 0): L_f ψ_j + S_sup,j + β ψ_j ≥ 0, with S_sup,j = sup_u L_g ψ_j · u over the kinematic acceleration box. It asks whether this row on its own could be satisfied with the bounded input. Raising β repairs it.

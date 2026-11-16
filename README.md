@@ -255,7 +255,7 @@ All code is in the package `src/fr3_hocbf/`. Run every script from `src/` as a m
 | Differentiable QP with bound slack (Eq. 18–19) | `fr3_hocbf/differentiable/qp_layer.py` |
 | Losses (Eq. 15–20) | `fr3_hocbf/train/train_rollout.py` |
 | Split before oversampling (Sec. II-C) | `fr3_hocbf/dataset/build_fullpool_split.py` |
-| Runtime fallback (Eq. 21–24) | `fr3_hocbf/evaluation/compare_rollout_policies.py` |
+| Runtime fallback (Eq. 21–24) | `fr3_hocbf/evaluation/gain_policies.py` (used by `compare_rollout_policies.py`) |
 | Closed-loop rollout, 50 Hz (Sec. III-C) | `fr3_hocbf/sim/rollout.py` |
 | Nominal controller (Sec. III-B) | `fr3_hocbf/sim/nominal_controller.py` |
 | Scenario generation (Sec. III-D) | `fr3_hocbf/dataset/generate_candidate_scenarios.py` |
