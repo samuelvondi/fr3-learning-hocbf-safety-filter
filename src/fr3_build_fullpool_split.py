@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import pinocchio as pin
 
-from fr3_rollout import make_rollout_context, load_scenario_yaml
+from fr3_hocbf.sim.rollout import make_rollout_context, load_scenario_yaml
 
 SEED = 20260520
 TRAIN_FRAC = 0.85

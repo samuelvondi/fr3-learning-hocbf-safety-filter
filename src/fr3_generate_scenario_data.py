@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 
-from fr3_rollout import (
+from fr3_hocbf.sim.rollout import (
     make_rollout_context,
     run_rollout_from_scenario_with_context,
     save_dataset_npz,

@@ -233,17 +233,17 @@ unique and never duplicated; train/val overlap is 0.
 
 | Paper element | File |
 |---|---|
-| Double integrator, capsule barrier (Eq. 2–4) | `fr3_geometry.py`, `fr3_torch_geometry.py` |
-| ψ, second-order condition, hard QP (Eq. 5–10) | `fr3_qp_solver.py` |
-| 43 collision rows | `fr3_qp_data.py` |
+| Double integrator, capsule barrier (Eq. 2–4) | `fr3_hocbf/sim/geometry.py`, `fr3_torch_geometry.py` |
+| ψ, second-order condition, hard QP (Eq. 5–10) | `fr3_hocbf/sim/qp_solver.py` |
+| 43 collision rows | `fr3_hocbf/sim/qp_data.py` |
 | Gain policy π_θ, 114-D features (Eq. 11–14) | `fr3_train_rollout.py` |
 | Feature normalization (Eq. 13) | `fr3_compute_feature_stats_ddqnorm.py` |
 | Differentiable QP with bound slack (Eq. 18–19) | `fr3_cvx_layer_bound_slack.py` |
 | Losses (Eq. 15–20) | `fr3_train_rollout.py` |
 | Split before oversampling (Sec. II-C) | `fr3_build_fullpool_split.py` |
 | Runtime fallback (Eq. 21–24) | `fr3_compare_rollout_policies.py` |
-| Closed-loop rollout, 50 Hz (Sec. III-C) | `fr3_rollout.py` |
-| Nominal controller (Sec. III-B) | `fr3_nominal_controller.py` |
+| Closed-loop rollout, 50 Hz (Sec. III-C) | `fr3_hocbf/sim/rollout.py` |
+| Nominal controller (Sec. III-B) | `fr3_hocbf/sim/nominal_controller.py` |
 | Scenario generation (Sec. III-D) | `fr3_generate_candidate_scenarios.py` |
 | PD-failed subset, 460 (Sec. III-F) | `fr3_run_pd_only_scenarios.py` |
 | Tables I–III | `fr3_make_final_metric_tables_generic_fixed.py` |

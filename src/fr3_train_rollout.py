@@ -68,7 +68,7 @@ import pinocchio as pin
 import torch
 import torch.nn as nn
 
-from fr3_rollout import (
+from fr3_hocbf.sim.rollout import (
     NUM_ARM_JOINTS,
     get_default_initial_state,
     load_scenario_yaml,
@@ -76,8 +76,8 @@ from fr3_rollout import (
 )
 from fr3_torch_kinematics import EE_FRAME_NAME, load_fr3_torch_kinematics
 from fr3_torch_geometry import compute_all_pair_terms_torch
-from fr3_nominal_controller import nominal_controller_js_standalone
-from fr3_qp_data import (
+from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
+from fr3_hocbf.sim.qp_data import (
     NUM_BOUND_ROWS,
     NUM_PAIR_ROWS,
     NUM_TOTAL_ROWS,
@@ -1020,7 +1020,7 @@ def train_one_segment(
 
     obstacles = obstacles_numpy_to_torch(scenario["obstacles"], dtype=torch.double, device="cpu")
 
-    # fr3_rollout.py updates obstacles before computing the first geometry row of a step.
+    # fr3_hocbf/sim/rollout.py updates obstacles before computing the first geometry row of a step.
     # If we start from saved step k, advance the stored obstacle state to time k*dt;
     # the loop update then moves it to (k+1)*dt before the first geometry evaluation.
     if start_step > 0:
@@ -1031,7 +1031,7 @@ def train_one_segment(
     goal_np = np.asarray(scenario["goal_ee_pos"], dtype=float)
     d_margin = float(scenario["d_margin"])
 
-    # Match fr3_rollout convention: target smoothing starts from current EE pose.
+    # Match fr3_hocbf.sim.rollout convention: target smoothing starts from current EE pose.
     target_prev_np = ee_position(pin_model, pin_data, ee_frame_id, q_full_np, dq_full_np)
 
     loss_total = torch.zeros((), dtype=torch.double)

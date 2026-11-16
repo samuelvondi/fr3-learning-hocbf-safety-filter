@@ -36,7 +36,7 @@ from typing import Iterable
 import numpy as np
 import pinocchio as pin
 
-from fr3_rollout import (
+from fr3_hocbf.sim.rollout import (
     NUM_ARM_JOINTS,
     make_rollout_context,
     load_scenario_yaml,
@@ -45,7 +45,7 @@ from fr3_rollout import (
     update_obstacles,
     compute_barrier_metrics,
 )
-from fr3_nominal_controller import nominal_controller_js_standalone
+from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
 
 
 def read_list_file(path: str) -> list[str]:

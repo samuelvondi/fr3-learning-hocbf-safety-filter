@@ -4,7 +4,7 @@ import numpy as np
 import cvxpy as cp
 import pinocchio as pin
 
-from fr3_geometry import CapsuleKinematics, compute_pair_geometry
+from fr3_hocbf.sim.geometry import CapsuleKinematics, compute_pair_geometry
 
 
 def h_func(p_rel, robot_link_radius, obstacle_radius, d_margin=0.0):

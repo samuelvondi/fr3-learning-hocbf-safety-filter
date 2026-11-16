@@ -50,7 +50,7 @@ import numpy as np
 import pinocchio as pin
 import torch
 
-from fr3_rollout import (
+from fr3_hocbf.sim.rollout import (
     NUM_ARM_JOINTS,
     MAX_OBSTACLES,
     make_rollout_context,
@@ -61,8 +61,8 @@ from fr3_rollout import (
     compute_all_pair_terms,
     compute_barrier_metrics,
 )
-from fr3_nominal_controller import nominal_controller_js_standalone
-from fr3_qp_data import (
+from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
+from fr3_hocbf.sim.qp_data import (
     NUM_PAIR_ROWS,
     NUM_BOUND_ROWS,
     NUM_TOTAL_ROWS,
@@ -626,7 +626,7 @@ def rollout_one_policy(
     max_steps = args.max_steps if args.max_steps is not None else max_steps_from_scenario
     max_steps = min(int(max_steps), max_steps_from_scenario)
 
-    # target smoothing starts from current EE position, matching fr3_rollout.py.
+    # target smoothing starts from current EE position, matching fr3_hocbf/sim/rollout.py.
     target_prev = ee_position(model, data, ee_frame_id, q_full, dq_full)
 
     at_goal_timer = 0.0
@@ -654,7 +654,7 @@ def rollout_one_policy(
         q_arm = q_full[:NUM_ARM_JOINTS].copy()
         dq_arm = dq_full[:NUM_ARM_JOINTS].copy()
 
-        # Match fr3_rollout.py convention: move obstacles before geometry/QP.
+        # Match fr3_hocbf/sim/rollout.py convention: move obstacles before geometry/QP.
         next_obstacles = update_obstacles(obstacles, dt) if args.move_obstacles else clone_obstacles(obstacles)
 
         all_pair_terms = compute_all_pair_terms(

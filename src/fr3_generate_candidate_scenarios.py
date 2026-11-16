@@ -23,7 +23,9 @@ URDF_FILENAME = "fr3_robot.urdf"
 # This file lives in:
 #   <workspace>/src/cbf_safety_filter/src/
 # so the package root is one directory above src/.
-package_directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+from fr3_hocbf import REPO_ROOT
+
+package_directory = str(REPO_ROOT)
 URDF_PATH = os.path.join(package_directory, "include", "urdf", URDF_FILENAME)
 try:
     model = pin.buildModelFromUrdf(URDF_PATH)

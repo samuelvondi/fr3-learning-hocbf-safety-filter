@@ -76,7 +76,9 @@ class JointSpec:
 
 
 def get_default_urdf_path() -> str:
-    package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    from fr3_hocbf import REPO_ROOT
+
+    package_root = str(REPO_ROOT)
     return os.path.join(package_root, "include", "urdf", "fr3_robot.urdf")
 
 

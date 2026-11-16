@@ -6,9 +6,9 @@ import yaml
 import numpy as np
 import pinocchio as pin
 
-from fr3_geometry import CapsuleKinematics, compute_pair_geometry
-from fr3_nominal_controller import nominal_controller_js_standalone
-from fr3_qp_solver import (
+from fr3_hocbf.sim.geometry import CapsuleKinematics, compute_pair_geometry
+from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
+from fr3_hocbf.sim.qp_solver import (
     h_func,
     Lf_h,
     psi_func,
@@ -23,7 +23,9 @@ MAX_OBSTACLES = 5
 
 
 def get_default_urdf_path():
-    package_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    from fr3_hocbf import REPO_ROOT
+
+    package_root = str(REPO_ROOT)
     return os.path.join(package_root, "include", "urdf", "fr3_robot.urdf")
 
 
@@ -1118,7 +1120,7 @@ def save_dataset_npz(dataset, output_path):
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 fr3_rollout.py <scenario_yaml_path> [output_npz_path]")
+        print("Usage: python -m fr3_hocbf.sim.rollout <scenario_yaml_path> [output_npz_path]")
         return
 
     scenario_path = sys.argv[1]
