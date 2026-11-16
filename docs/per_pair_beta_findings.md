@@ -42,7 +42,7 @@ The fallback fires if any pair fails either check. It then sets γ = max(γ_NN, 
   - The β head is a small MLP with weights shared across pairs, applied to each of the 43 pair rows. Its input is the context, 8 per-pair features (h, L_f h, v_rel², ψ, L_f ψ, S_sup, L_g ψ·u_nom, ‖L_g ψ‖, normalised with stats over active rows of the training rollouts), an activity bit, a pair-type one-hot (obstacle / self-collision) and an 8-D learned pair embedding.
   - Output: β_j = floor + (250 − floor)·sigmoid(·). 148k parameters, against 138k for the old network.
 - **QP:** unchanged except that row j uses β_j. Inactive rows are zeroed as before.
-- **Training** (`train/train_rollout_pp_beta.py`): same differentiable bound-slack QP rollout, scenarios, losses and hyperparameters as README §5.5, trained from scratch. The only change is the p-regularisation, 0.5·(γ² + mean over active pairs of β_j²), which keeps the old scale.
+- **Training** (`train/train_rollout.py --policy per_pair`): same differentiable bound-slack QP rollout, scenarios, losses and hyperparameters as README §5.5, trained from scratch. The only change is the p-regularisation, 0.5·(γ² + mean over active pairs of β_j²), which keeps the old scale.
 - **Fallback** (`--modes nn_pp_beta_fallback`): same pre-QP check, with G2_j using β_NN,j. γ follows the existing rule. If the check fails, G2_j is re-checked with γ_final, and failing ("flagged") pairs get β_req,j + 0.5. The other pairs are set by `--pp-unflagged`:
   - `keep`: β_NN,j. In practice a γ-only fallback, since G2 never flags (§2).
   - `cap_old`: min(β_NN,j, B), with B the existing scalar fallback β. This is the per-pair form of the existing rule.
@@ -128,7 +128,7 @@ Fallback variants for seed 0, rule 1:
   - Positions agree to 8·10⁻¹⁶ m, Jacobians to 7·10⁻¹² and their q-derivatives to 3·10⁻¹¹. The 7·10⁻¹² comes mostly from the original dividing the joint axis by `norm + 1e-12`.
   - 37× faster per kinematics call and **4.7× faster per training segment** (8.1 → 1.7 s; about 2.8 s with the per-pair head).
   - Weight gradients differ by 10⁻⁴–10⁻². That is the same size as the effect of perturbing the start state by 10⁻¹² in the original code: the gradient through the QP is very sensitive near active constraints. A retraining with fast kinematics is therefore a new run, not a bitwise reproduction.
-  - Only the new training script uses it (`--fast-kinematics`, default on). `train/train_rollout.py` is unchanged.
+  - Opt-in via `--fast-kinematics` of `train/train_rollout.py` (default off, so the shared-gain training stays bit-identical to the published run). The per-pair runs above used it.
 - **Another machine:** single-core speed is what counts. A 9th-gen desktop i9 is probably no faster per core than this 12th-gen laptop, though better cooling avoids throttling. Measure with the one-segment profile before moving work.
 
 ## 5. Data and reproduction
@@ -150,7 +150,7 @@ python -m fr3_hocbf.dataset.generate_scenario_data --scenario-dir <dir of the 96
 python -m fr3_hocbf.dataset.compute_pp_feature_stats \
   --rollout-labeled ../data/fr3_fullpool_train_weighted_local.jsonl --out <pp_stats.npz>
 # training: README section 5.5 arguments plus
-python -m fr3_hocbf.train.train_rollout_pp_beta <README 5.5 args> \
+python -m fr3_hocbf.train.train_rollout <README 5.5 args> --policy per_pair --fast-kinematics \
   --stats-in ../artifacts/checkpoints/epoch_0022_v10_fullpool_g300.pt --pp-stats-in <pp_stats.npz> --seed <s>
 # evaluation
 python -m fr3_hocbf.evaluation.compare_rollout_policies <scenario list> \

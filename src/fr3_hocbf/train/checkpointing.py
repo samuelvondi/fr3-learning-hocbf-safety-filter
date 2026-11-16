@@ -78,7 +78,7 @@ def maybe_load_model_weights(model: P12ParamNet, path: str | None) -> None:
 
 def save_checkpoint(
     path: str,
-    model: P12ParamNet,
+    model: torch.nn.Module,
     cfg: RolloutTrainCfg,
     feat_mean: torch.Tensor,
     feat_std: torch.Tensor,
@@ -86,6 +86,7 @@ def save_checkpoint(
     metric_name: str,
     metric_value: float,
     extra: dict | None = None,
+    policy_meta: dict | None = None,
 ):
     payload = {
         "model_state_dict": model.state_dict(),
@@ -112,6 +113,8 @@ def save_checkpoint(
         "metric_value": float(metric_value),
         "cfg": asdict(cfg),
     }
+    if policy_meta is not None:
+        payload.update(policy_meta)
     if extra is not None:
         payload["extra"] = extra
     torch.save(payload, path)

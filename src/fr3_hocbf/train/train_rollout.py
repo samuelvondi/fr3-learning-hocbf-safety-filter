@@ -54,6 +54,7 @@ Example:
 
 import argparse
 import json
+import os
 import random
 import time
 from dataclasses import asdict
@@ -72,9 +73,11 @@ from fr3_hocbf.sim.rollout import (
     make_rollout_context,
 )
 from fr3_hocbf.differentiable.kinematics import EE_FRAME_NAME, load_fr3_torch_kinematics
+from fr3_hocbf.differentiable.kinematics_fast import load_fr3_torch_kinematics_fast
 from fr3_hocbf.differentiable.geometry import compute_all_pair_terms_torch
-from fr3_hocbf.differentiable.qp_rows import build_full_qp_torch_batch
+from fr3_hocbf.differentiable.qp_rows import build_full_qp_torch_batch, build_full_qp_torch_batch_pp
 from fr3_hocbf.policy.p12_net import P12ParamNet
+from fr3_hocbf.policy.pp_beta import PP_ARCH, PP_FEATURE_NAMES, PerPairBetaNet, kinematic_ddq_bounds_torch
 from fr3_hocbf.train.config import DT_DEFAULT, RolloutTrainCfg
 from fr3_hocbf.train.checkpointing import (
     aggregate_stats,
@@ -224,11 +227,18 @@ def compute_nominal_detached(
 # ---------------------------------------------------------------------
 
 
+def masked_beta_mean(beta: torch.Tensor, pair_mask: torch.Tensor, power: int = 1) -> torch.Tensor:
+    """Mean of beta_j**power over active pairs; over all pairs if none is active."""
+    active = pair_mask > 0.5
+    vals = beta[active] if bool(torch.any(active)) else beta.reshape(-1)
+    return (vals ** power).mean()
+
+
 def train_one_segment(
     scenario_path: str,
     pin_context: dict,
     torch_kin,
-    model: P12ParamNet,
+    model: P12ParamNet | PerPairBetaNet,
     bound_slack_layer,
     optimizer,
     feat_mean: torch.Tensor,
@@ -241,7 +251,11 @@ def train_one_segment(
     """
     Train/evaluate one short rollout segment.
     Batch size is intentionally 1 in this first version.
+
+    P12ParamNet: shared gamma, beta. PerPairBetaNet: shared gamma and beta_j per pair row;
+    HOCBF row j uses beta_j and the p-regularisation uses the mean of beta_j^2 over active pairs.
     """
+    per_pair = isinstance(model, PerPairBetaNet)
     if train:
         model.train()
         optimizer.zero_grad()
@@ -359,25 +373,43 @@ def train_one_segment(
             Lf_h_all=pair_terms["Lf_h_all"],
         )
         z_norm = normalize_features_torch(z_raw, feat_mean, feat_std)
-        p12 = model(z_norm)
+        if per_pair:
+            q_b, dq_b = q.unsqueeze(0), dq.unsqueeze(0)
+            ddq_min_kin, ddq_max_kin = kinematic_ddq_bounds_torch(q_b, dq_b, limits_t, cfg.dt)
+            pt_b = {key: pair_terms[key].unsqueeze(0) for key in ("h_all", "Lf_h_all", "vrel_sq2_all", "Lg_psi_all", "pair_mask")}
+            gamma, beta = model(
+                z_norm,
+                {**pt_b, "u_nom": ddq_nominal.unsqueeze(0), "ddq_min_kin": ddq_min_kin, "ddq_max_kin": ddq_max_kin},
+            )
+            A_full, b_full, _ = build_full_qp_torch_batch_pp(gamma, beta, q_b, dq_b, pt_b, cfg.dt, limits_t)
+        else:
+            p12 = model(z_norm)
+            A_full, b_full, _ = build_full_qp_torch_batch(
+                p12=p12,
+                q_arm=q.unsqueeze(0),
+                dq_arm=dq.unsqueeze(0),
+                h_all=pair_terms["h_all"].unsqueeze(0),
+                Lf_h_all=pair_terms["Lf_h_all"].unsqueeze(0),
+                vrel_sq2_all=pair_terms["vrel_sq2_all"].unsqueeze(0),
+                Lg_psi_all=pair_terms["Lg_psi_all"].unsqueeze(0),
+                pair_mask=pair_terms["pair_mask"].unsqueeze(0),
+                dt=cfg.dt,
+                ddq_min_arm=limits_t["ddq_min_arm"],
+                ddq_max_arm=limits_t["ddq_max_arm"],
+                dq_min_arm=limits_t["dq_min_arm"],
+                dq_max_arm=limits_t["dq_max_arm"],
+                q_min_arm=limits_t["q_min_arm"],
+                q_max_arm=limits_t["q_max_arm"],
+            )
 
-        A_full, b_full, _ = build_full_qp_torch_batch(
-            p12=p12,
-            q_arm=q.unsqueeze(0),
-            dq_arm=dq.unsqueeze(0),
-            h_all=pair_terms["h_all"].unsqueeze(0),
-            Lf_h_all=pair_terms["Lf_h_all"].unsqueeze(0),
-            vrel_sq2_all=pair_terms["vrel_sq2_all"].unsqueeze(0),
-            Lg_psi_all=pair_terms["Lg_psi_all"].unsqueeze(0),
-            pair_mask=pair_terms["pair_mask"].unsqueeze(0),
-            dt=cfg.dt,
-            ddq_min_arm=limits_t["ddq_min_arm"],
-            ddq_max_arm=limits_t["ddq_max_arm"],
-            dq_min_arm=limits_t["dq_min_arm"],
-            dq_max_arm=limits_t["dq_max_arm"],
-            q_min_arm=limits_t["q_min_arm"],
-            q_max_arm=limits_t["q_max_arm"],
-        )
+        # gamma (p1) is indexed afresh at every use, exactly as before the per-pair
+        # option existed, so the autograd graph and the results stay bit-identical.
+        def p1_now():
+            return gamma[0, 0] if per_pair else p12[0, 0]
+
+        # Logged beta: p2, or the mean of beta_j over the active pairs.
+        def p2_logged():
+            return masked_beta_mean(beta[0], pair_terms["pair_mask"]) if per_pair else p12[0, 1]
 
         # Bound/input-slack DQP:
         #   - pair/HOCBF rows hard
@@ -398,7 +430,7 @@ def train_one_segment(
                 if bool(torch.any(active).detach().cpu().item())
                 else float("nan")
             )
-            psi_dbg = pair_terms["Lf_h_all"] + p12[0, 0] * pair_terms["h_all"]
+            psi_dbg = pair_terms["Lf_h_all"] + p1_now() * pair_terms["h_all"]
             min_psi_dbg = (
                 float(psi_dbg[active].min().detach().cpu().item())
                 if bool(torch.any(active).detach().cpu().item())
@@ -432,8 +464,8 @@ def train_one_segment(
                 "h_mean": float("nan"),
                 "g1_mean": float("nan"),
                 "g2_mean": float("nan"),
-                "p1_mean": float(p12[0, 0].detach().cpu().item()),
-                "p2_mean": float(p12[0, 1].detach().cpu().item()),
+                "p1_mean": float(p1_now().detach().cpu().item()),
+                "p2_mean": float(p2_logged().detach().cpu().item()),
                 "horizon": H,
                 "scenario": Path(scenario_path).stem,
                 "start_step": start_step,
@@ -487,7 +519,11 @@ def train_one_segment(
             ).mean()
         else:
             loss_slack = mean_sq_bound_slack(s_bound)
-        loss_preg = (p12 ** 2).mean()
+        if per_pair:
+            # Old: mean([gamma, beta]^2) = 0.5*(gamma^2 + beta^2). Per-pair: beta^2 -> mean over active beta_j^2.
+            loss_preg = 0.5 * (gamma[0, 0] ** 2 + masked_beta_mean(beta[0], pair_terms["pair_mask"], power=2))
+        else:
+            loss_preg = (p12 ** 2).mean()
 
         # Differentiable dynamics integration.
         # For training we integrate the bound-slack solution directly.
@@ -508,7 +544,7 @@ def train_one_segment(
             d_margin=d_margin,
         )
         post_active = post_pair_terms["pair_mask"] > 0.5
-        psi_post_all = post_pair_terms["Lf_h_all"] + p12[0, 0] * post_pair_terms["h_all"]
+        psi_post_all = post_pair_terms["Lf_h_all"] + p1_now() * post_pair_terms["h_all"]
         if bool(torch.any(post_active).detach().cpu().item()):
             h_post_active = post_pair_terms["h_all"][post_active]
             psi_post_active = psi_post_all[post_active]
@@ -564,8 +600,8 @@ def train_one_segment(
         goal_dist_value = float(goal_dist.detach().cpu().item())
         goal_dist_sum += goal_dist_value
         goal_final_dist = goal_dist_value
-        p1_sum += float(p12[0, 0].detach().cpu().item())
-        p2_sum += float(p12[0, 1].detach().cpu().item())
+        p1_sum += float(p1_now().detach().cpu().item())
+        p2_sum += float(p2_logged().detach().cpu().item())
 
         # Diagnostics/checkpoint statistics use post-step h and psi, not pair-row
         # QP residuals. This matches the new safety loss.
@@ -630,7 +666,7 @@ def train_one_segment(
         "g1_mean": float(psi_sum / float(max(1, psi_count))),
         "g2_mean": float(g2_sum / float(max(1, g2_count))),
         "p1_mean": p1_sum / float(max(1, H)),
-        "p2_mean": p2_sum / float(max(1, H)),
+        "p2_mean": p2_sum / float(max(1, H)),  # per-pair: mean over steps of the active-pair mean beta_j
         "mean_segment_time_s": float(H) * float(cfg.dt),
         "horizon": H,
         "scenario": Path(scenario_path).stem,
@@ -645,8 +681,24 @@ def train_one_segment(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("scenarios", nargs="+", help="Scenario YAML(s), directories, globs, or txt files")
-    parser.add_argument("--stats-in", type=str, required=True, help="Feature stats .npz for the 114D input")
+    parser.add_argument("--stats-in", type=str, required=True, help="Feature stats .npz for the 114D input, or a checkpoint .pt with embedded feat_mean/feat_std")
     parser.add_argument("--init-model", type=str, default=None, help="Optional checkpoint to warm-start from")
+    parser.add_argument(
+        "--policy",
+        choices=["shared", "per_pair"],
+        default="shared",
+        help="shared: P12ParamNet (one gamma, one beta). per_pair: PerPairBetaNet (one gamma, beta_j per pair row).",
+    )
+    parser.add_argument("--pp-stats-in", type=str, default=None, help="per_pair: per-pair feature stats .npz (dataset.compute_pp_feature_stats)")
+    parser.add_argument("--pair-embed-dim", type=int, default=8, help="per_pair: size of the learned pair embedding")
+    parser.add_argument("--pp-head-hidden", type=int, default=64, help="per_pair: hidden width of the shared beta head")
+    parser.add_argument(
+        "--fast-kinematics",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Analytic endpoint Jacobians from one FK pass (differentiable/kinematics_fast.py), ~4.7x faster per "
+        "segment. Same math, but not bit-identical to the default per-endpoint autograd Jacobians.",
+    )
 
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--segments-per-epoch", type=int, default=1)
@@ -725,6 +777,9 @@ def main():
     )
 
     args = parser.parse_args()
+    per_pair = args.policy == "per_pair"
+    if per_pair and args.pp_stats_in is None:
+        parser.error("--policy per_pair requires --pp-stats-in")
 
     cfg = RolloutTrainCfg(
         seed=args.seed,
@@ -860,28 +915,56 @@ def main():
     pin_context = make_rollout_context()
 
     # Torch kinematics is used for differentiable geometry.
-    torch_kin = load_fr3_torch_kinematics()
-    print("torch URDF =", torch_kin.urdf_path)
+    torch_kin = load_fr3_torch_kinematics_fast() if args.fast_kinematics else load_fr3_torch_kinematics()
+    print("torch URDF =", torch_kin.urdf_path, "|", type(torch_kin).__name__)
 
-    model = P12ParamNet(
-        input_dim=INPUT_DIM,
-        hidden_dim=cfg.hidden_dim,
-        p1_floor=cfg.p1_floor,
-        p2_floor=cfg.p2_floor,
-        p1_max=cfg.p1_max,
-        p2_max=cfg.p2_max,
-        init_p1=cfg.init_p1,
-        init_p2=cfg.init_p2,
-    ).double()
+    policy_meta = None
+    if per_pair:
+        model = PerPairBetaNet(
+            input_dim=INPUT_DIM,
+            hidden_dim=cfg.hidden_dim,
+            pair_embed_dim=args.pair_embed_dim,
+            head_hidden=args.pp_head_hidden,
+            p1_floor=cfg.p1_floor,
+            p2_floor=cfg.p2_floor,
+            p1_max=cfg.p1_max,
+            p2_max=cfg.p2_max,
+            init_p1=cfg.init_p1,
+            init_p2=cfg.init_p2,
+        )
+        pp_stats = np.load(os.path.expanduser(args.pp_stats_in))
+        model.set_pp_stats(pp_stats["pp_mean"], pp_stats["pp_std"])
+        print("pp_stats_in =", args.pp_stats_in, "| num_params =", sum(p.numel() for p in model.parameters()))
+        # Extra checkpoint fields read by policy/pp_beta.load_pp_policy.
+        policy_meta = {
+            "arch": PP_ARCH,
+            "pp_feature_names": list(PP_FEATURE_NAMES),
+            "pair_embed_dim": int(args.pair_embed_dim),
+            "pp_head_hidden": int(args.pp_head_hidden),
+            "pp_stats_in": args.pp_stats_in,
+            "fast_kinematics": bool(args.fast_kinematics),
+        }
+    else:
+        model = P12ParamNet(
+            input_dim=INPUT_DIM,
+            hidden_dim=cfg.hidden_dim,
+            p1_floor=cfg.p1_floor,
+            p2_floor=cfg.p2_floor,
+            p1_max=cfg.p1_max,
+            p2_max=cfg.p2_max,
+            init_p1=cfg.init_p1,
+            init_p2=cfg.init_p2,
+        ).double()
     maybe_load_model_weights(model, args.init_model)
     if args.init_model is not None:
         print("warm-started from", args.init_model)
 
-    with torch.no_grad():
-        z0 = torch.zeros(1, INPUT_DIM, dtype=torch.double)
-        p12_0 = model(z0)
-        print("initial p12 at zero normalized input:", p12_0.detach().cpu().numpy())
-        print("p1 cap =", cfg.p1_max, "p2 cap =", cfg.p2_max)
+    if not per_pair:
+        with torch.no_grad():
+            z0 = torch.zeros(1, INPUT_DIM, dtype=torch.double)
+            p12_0 = model(z0)
+            print("initial p12 at zero normalized input:", p12_0.detach().cpu().numpy())
+    print("p1 cap =", cfg.p1_max, "p2 cap =", cfg.p2_max)
 
     bound_slack_layer = make_bound_slack_qp_layer(
         num_u=NUM_ARM_JOINTS,
@@ -1075,6 +1158,7 @@ def main():
             metric_name=f"{ckpt_split}_latest_loss",
             metric_value=float(ckpt_ep["loss"]),
             extra={ckpt_split: ckpt_ep},
+            policy_meta=policy_meta,
         )
 
         # Safe candidate checkpoints:
@@ -1099,6 +1183,7 @@ def main():
                 metric_name=f"{ckpt_split}_{cfg.track_metric}_safe_candidate",
                 metric_value=current_track,
                 extra={ckpt_split: ckpt_ep},
+                policy_meta=policy_meta,
             )
             row = make_candidate_summary_row(
                 epoch=epoch,

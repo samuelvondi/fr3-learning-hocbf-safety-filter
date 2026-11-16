@@ -85,6 +85,15 @@ def normalize_features_numpy(z_raw, mean, std):
 
 
 def load_feature_stats(path: str) -> tuple[torch.Tensor, torch.Tensor]:
+    """114-D feature mean/std from a stats .npz, or embedded in a training checkpoint .pt."""
+    if path.endswith(".pt"):
+        ckpt = torch.load(os.path.expanduser(path), map_location="cpu", weights_only=False)
+        mean_t = torch.as_tensor(ckpt["feat_mean"], dtype=torch.double)
+        std_t = torch.clamp(torch.as_tensor(ckpt["feat_std"], dtype=torch.double), min=1e-6)
+        if mean_t.numel() != INPUT_DIM:
+            raise ValueError(f"Expected feature dim {INPUT_DIM}, got {mean_t.numel()} from {path}")
+        return mean_t, std_t
+
     stats = np.load(os.path.expanduser(path))
     if "feat_mean" in stats.files:
         mean = stats["feat_mean"]
