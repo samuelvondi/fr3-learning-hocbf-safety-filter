@@ -233,12 +233,12 @@ unique and never duplicated; train/val overlap is 0.
 
 | Paper element | File |
 |---|---|
-| Double integrator, capsule barrier (Eq. 2–4) | `fr3_hocbf/sim/geometry.py`, `fr3_torch_geometry.py` |
+| Double integrator, capsule barrier (Eq. 2–4) | `fr3_hocbf/sim/geometry.py`, `fr3_hocbf/differentiable/geometry.py` |
 | ψ, second-order condition, hard QP (Eq. 5–10) | `fr3_hocbf/sim/qp_solver.py` |
 | 43 collision rows | `fr3_hocbf/sim/qp_data.py` |
 | Gain policy π_θ, 114-D features (Eq. 11–14) | `fr3_train_rollout.py` |
 | Feature normalization (Eq. 13) | `fr3_compute_feature_stats_ddqnorm.py` |
-| Differentiable QP with bound slack (Eq. 18–19) | `fr3_cvx_layer_bound_slack.py` |
+| Differentiable QP with bound slack (Eq. 18–19) | `fr3_hocbf/differentiable/qp_layer.py` |
 | Losses (Eq. 15–20) | `fr3_train_rollout.py` |
 | Split before oversampling (Sec. II-C) | `fr3_build_fullpool_split.py` |
 | Runtime fallback (Eq. 21–24) | `fr3_compare_rollout_policies.py` |
@@ -248,7 +248,7 @@ unique and never duplicated; train/val overlap is 0.
 | PD-failed subset, 460 (Sec. III-F) | `fr3_run_pd_only_scenarios.py` |
 | Tables I–III | `fr3_make_final_metric_tables_generic_fixed.py` |
 | Fig. 4 | `fr3_plot_compare_results.py` |
-| Appendix A kinematics / Jacobians | `fr3_torch_kinematics.py` |
+| Appendix A kinematics / Jacobians | `fr3_hocbf/differentiable/kinematics.py` |
 
 ---
 

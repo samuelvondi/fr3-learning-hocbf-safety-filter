@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 import torch
 
-from fr3_torch_kinematics import (
+from fr3_hocbf.differentiable.kinematics import (
     NUM_ARM_JOINTS,
     ACTIVE_LINKS_DEF,
     EE_FRAME_NAME,

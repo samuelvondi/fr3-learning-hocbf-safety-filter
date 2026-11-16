@@ -74,8 +74,8 @@ from fr3_hocbf.sim.rollout import (
     load_scenario_yaml,
     make_rollout_context,
 )
-from fr3_torch_kinematics import EE_FRAME_NAME, load_fr3_torch_kinematics
-from fr3_torch_geometry import compute_all_pair_terms_torch
+from fr3_hocbf.differentiable.kinematics import EE_FRAME_NAME, load_fr3_torch_kinematics
+from fr3_hocbf.differentiable.geometry import compute_all_pair_terms_torch
 from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
 from fr3_hocbf.sim.qp_data import (
     NUM_BOUND_ROWS,
@@ -83,7 +83,7 @@ from fr3_hocbf.sim.qp_data import (
     NUM_TOTAL_ROWS,
     get_joint_limits,
 )
-from fr3_cvx_layer_bound_slack import (
+from fr3_hocbf.differentiable.qp_layer import (
     bound_violation_batch,
     hard_violation_batch,
     make_bound_slack_qp_layer,
