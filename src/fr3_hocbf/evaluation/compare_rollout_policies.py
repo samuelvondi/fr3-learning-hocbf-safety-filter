@@ -39,20 +39,17 @@ Recommended first smoke test:
 """
 
 import argparse
-import csv
-import glob
-import json
 import os
 import time
 from pathlib import Path
-from typing import Iterable
 
 import cvxpy as cp
 import numpy as np
-import pinocchio as pin
 import torch
 
+from fr3_hocbf.common_io import expand_scenario_inputs, write_csv, write_json
 from fr3_hocbf.sim.rollout import (
+    ee_position,
     NUM_ARM_JOINTS,
     MAX_OBSTACLES,
     make_rollout_context,
@@ -88,34 +85,6 @@ NUM_ROBOT_OBSTACLE_ROWS = 8 * MAX_OBSTACLES  # 8 active links * 5 obstacle slots
 # ---------------------------------------------------------------------
 # input helpers
 # ---------------------------------------------------------------------
-def read_list_file(path: str) -> list[str]:
-    with open(path, "r") as f:
-        return [line.strip() for line in f if line.strip()]
-
-
-def expand_scenario_inputs(inputs: Iterable[str]) -> list[str]:
-    out: list[str] = []
-    for raw in inputs:
-        p = os.path.expanduser(raw)
-
-        if os.path.isfile(p) and p.endswith(".txt"):
-            out.extend(read_list_file(p))
-            continue
-
-        if os.path.isdir(p):
-            out.extend(sorted(glob.glob(os.path.join(p, "*.yaml"))))
-            out.extend(sorted(glob.glob(os.path.join(p, "*.yml"))))
-            continue
-
-        matches = sorted(glob.glob(p))
-        if matches:
-            out.extend(matches)
-        else:
-            out.append(p)
-
-    out = [os.path.abspath(os.path.expanduser(p)) for p in out if p.endswith((".yaml", ".yml"))]
-    out = sorted(list(dict.fromkeys(out)))
-    return out
 
 
 # ---------------------------------------------------------------------
@@ -797,13 +766,6 @@ def _pair_values_str(values: np.ndarray, mask: np.ndarray) -> str:
 # ---------------------------------------------------------------------
 # rollout simulation
 # ---------------------------------------------------------------------
-def ee_position(model, data, ee_frame_id: int, q_full: np.ndarray, dq_full: np.ndarray | None = None) -> np.ndarray:
-    if dq_full is None:
-        pin.forwardKinematics(model, data, q_full)
-    else:
-        pin.forwardKinematics(model, data, q_full, dq_full, np.zeros(model.nv))
-    pin.updateFramePlacements(model, data)
-    return data.oMf[ee_frame_id].translation.copy()
 
 
 def rollout_one_policy(
@@ -1339,19 +1301,6 @@ def rollout_one_policy(
 # ---------------------------------------------------------------------
 # output helpers
 # ---------------------------------------------------------------------
-def write_csv(path: str, rows: list[dict]):
-    if not rows:
-        return
-    keys = list(rows[0].keys())
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def write_json(path: str, obj):
-    with open(path, "w") as f:
-        json.dump(obj, f, indent=2)
 
 
 # ---------------------------------------------------------------------

@@ -64,11 +64,12 @@ from pathlib import Path
 from typing import Iterable
 
 import numpy as np
-import pinocchio as pin
 import torch
 import torch.nn as nn
 
+from fr3_hocbf.common_io import expand_scenario_inputs, read_list_file
 from fr3_hocbf.sim.rollout import (
+    ee_position,
     NUM_ARM_JOINTS,
     get_default_initial_state,
     load_scenario_yaml,
@@ -448,34 +449,6 @@ def load_npz_checked(path):
 # ---------------------------------------------------------------------
 # input helpers
 # ---------------------------------------------------------------------
-def read_list_file(path: str) -> list[str]:
-    with open(path, "r") as f:
-        return [line.strip() for line in f if line.strip()]
-
-
-def expand_scenario_inputs(inputs: Iterable[str]) -> list[str]:
-    out: list[str] = []
-    for raw in inputs:
-        p = os.path.expanduser(raw)
-
-        if os.path.isfile(p) and p.endswith(".txt"):
-            out.extend(read_list_file(p))
-            continue
-
-        if os.path.isdir(p):
-            out.extend(sorted(glob.glob(os.path.join(p, "*.yaml"))))
-            out.extend(sorted(glob.glob(os.path.join(p, "*.yml"))))
-            continue
-
-        matches = sorted(glob.glob(p))
-        if matches:
-            out.extend(matches)
-        else:
-            out.append(p)
-
-    out = [os.path.abspath(os.path.expanduser(p)) for p in out if p.endswith((".yaml", ".yml"))]
-    out = sorted(list(dict.fromkeys(out)))
-    return out
 
 
 def expand_rollout_inputs(inputs: Iterable[str]) -> list[str]:
@@ -513,8 +486,6 @@ def scenario_name_from_rollout_path(path: str) -> str:
 
 def build_scenario_map(scenario_paths: list[str]) -> dict[str, str]:
     return {Path(p).stem: p for p in scenario_paths}
-
-
 
 
 def read_jsonl_file(path: str) -> list[dict]:
@@ -862,13 +833,6 @@ def build_full_qp_torch_batch(
 # ---------------------------------------------------------------------
 # Pinocchio helper
 # ---------------------------------------------------------------------
-def ee_position(model, data, ee_frame_id: int, q_full: np.ndarray, dq_full: np.ndarray | None = None) -> np.ndarray:
-    if dq_full is None:
-        pin.forwardKinematics(model, data, q_full)
-    else:
-        pin.forwardKinematics(model, data, q_full, dq_full, np.zeros(model.nv))
-    pin.updateFramePlacements(model, data)
-    return data.oMf[ee_frame_id].translation.copy()
 
 
 # ---------------------------------------------------------------------

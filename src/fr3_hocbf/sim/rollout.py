@@ -90,6 +90,15 @@ def get_default_initial_state(model):
     q_full_init[:7] = get_default_initial_q()
     return q_full_init, dq_full_init
 
+
+def ee_position(model, data, ee_frame_id: int, q_full: np.ndarray, dq_full: np.ndarray | None = None) -> np.ndarray:
+    if dq_full is None:
+        pin.forwardKinematics(model, data, q_full)
+    else:
+        pin.forwardKinematics(model, data, q_full, dq_full, np.zeros(model.nv))
+    pin.updateFramePlacements(model, data)
+    return data.oMf[ee_frame_id].translation.copy()
+
 def make_rollout_context(urdf_path=None):
     """
     Load reusable FR3 rollout context once.

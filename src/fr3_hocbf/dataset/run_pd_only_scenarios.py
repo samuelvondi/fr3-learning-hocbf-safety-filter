@@ -25,18 +25,14 @@ Outputs:
 """
 
 import argparse
-import csv
-import glob
-import json
-import os
 import time
 from pathlib import Path
-from typing import Iterable
 
 import numpy as np
-import pinocchio as pin
 
+from fr3_hocbf.common_io import expand_scenario_inputs, write_csv, write_json
 from fr3_hocbf.sim.rollout import (
+    ee_position,
     NUM_ARM_JOINTS,
     make_rollout_context,
     load_scenario_yaml,
@@ -46,63 +42,6 @@ from fr3_hocbf.sim.rollout import (
     compute_barrier_metrics,
 )
 from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
-
-
-def read_list_file(path: str) -> list[str]:
-    with open(path, "r") as f:
-        return [line.strip() for line in f if line.strip()]
-
-
-def expand_scenario_inputs(inputs: Iterable[str]) -> list[str]:
-    out: list[str] = []
-    for raw in inputs:
-        p = os.path.expanduser(raw)
-
-        if os.path.isfile(p) and p.endswith(".txt"):
-            out.extend(read_list_file(p))
-            continue
-
-        if os.path.isdir(p):
-            out.extend(sorted(glob.glob(os.path.join(p, "*.yaml"))))
-            out.extend(sorted(glob.glob(os.path.join(p, "*.yml"))))
-            continue
-
-        matches = sorted(glob.glob(p))
-        if matches:
-            out.extend(matches)
-        else:
-            out.append(p)
-
-    out = [
-        os.path.abspath(os.path.expanduser(p))
-        for p in out
-        if p.endswith((".yaml", ".yml"))
-    ]
-    return sorted(list(dict.fromkeys(out)))
-
-
-def ee_position(model, data, ee_frame_id: int, q_full: np.ndarray, dq_full: np.ndarray | None = None) -> np.ndarray:
-    if dq_full is None:
-        pin.forwardKinematics(model, data, q_full)
-    else:
-        pin.forwardKinematics(model, data, q_full, dq_full, np.zeros(model.nv))
-    pin.updateFramePlacements(model, data)
-    return data.oMf[ee_frame_id].translation.copy()
-
-
-def write_csv(path: str, rows: list[dict]) -> None:
-    if not rows:
-        return
-    keys = list(rows[0].keys())
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=keys, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def write_json(path: str, obj) -> None:
-    with open(path, "w") as f:
-        json.dump(obj, f, indent=2)
 
 
 def write_path_list(path: str, scenario_paths: list[str]) -> None:
