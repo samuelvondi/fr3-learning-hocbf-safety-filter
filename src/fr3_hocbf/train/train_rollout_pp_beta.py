@@ -51,6 +51,7 @@ from fr3_hocbf.sim.rollout import NUM_ARM_JOINTS, ee_position, get_default_initi
 from fr3_hocbf.differentiable.kinematics import EE_FRAME_NAME, load_fr3_torch_kinematics
 from fr3_hocbf.differentiable.kinematics_fast import load_fr3_torch_kinematics_fast
 from fr3_hocbf.differentiable.geometry import compute_all_pair_terms_torch
+from fr3_hocbf.differentiable.qp_rows import build_full_qp_torch_batch_pp
 from fr3_hocbf.sim.qp_data import NUM_BOUND_ROWS, NUM_PAIR_ROWS, NUM_TOTAL_ROWS, get_joint_limits
 from fr3_hocbf.differentiable.qp_layer import (
     bound_violation_batch,
@@ -64,7 +65,6 @@ from fr3_hocbf.train.train_rollout import (
     DT_DEFAULT,
     RolloutTrainCfg,
     aggregate_stats,
-    build_bound_rows_torch,
     build_scenario_map,
     clone_obstacles_torch,
     compute_nominal_detached,
@@ -87,39 +87,8 @@ from fr3_hocbf.policy.pp_beta import (
     PP_ARCH,
     PP_FEATURE_NAMES,
     PerPairBetaNet,
-    build_collision_rows_torch_pp,
     kinematic_ddq_bounds_torch,
 )
-
-
-def build_full_qp_torch_batch_pp(gamma, beta, q_arm, dq_arm, pair_terms_b, dt, limits_t):
-    """build_full_qp_torch_batch with per-pair beta."""
-    A_coll, b_coll, mask_coll = build_collision_rows_torch_pp(
-        gamma=gamma,
-        beta=beta,
-        h_all=pair_terms_b["h_all"],
-        Lf_h_all=pair_terms_b["Lf_h_all"],
-        vrel_sq2_all=pair_terms_b["vrel_sq2_all"],
-        Lg_psi_all=pair_terms_b["Lg_psi_all"],
-        pair_mask=pair_terms_b["pair_mask"],
-    )
-    A_bounds, b_bounds, mask_bounds = build_bound_rows_torch(
-        q_arm=q_arm,
-        dq_arm=dq_arm,
-        dt=dt,
-        ddq_min_arm=limits_t["ddq_min_arm"],
-        ddq_max_arm=limits_t["ddq_max_arm"],
-        dq_min_arm=limits_t["dq_min_arm"],
-        dq_max_arm=limits_t["dq_max_arm"],
-        q_min_arm=limits_t["q_min_arm"],
-        q_max_arm=limits_t["q_max_arm"],
-    )
-    A_full = torch.cat([A_coll, A_bounds], dim=1)
-    b_full = torch.cat([b_coll, b_bounds], dim=1)
-    mask_full = torch.cat([mask_coll, mask_bounds], dim=1)
-    A_full = A_full * mask_full.unsqueeze(-1)
-    b_full = b_full * mask_full
-    return A_full, b_full, mask_full
 
 
 def masked_beta_mean(beta: torch.Tensor, pair_mask: torch.Tensor, power: int = 1) -> torch.Tensor:

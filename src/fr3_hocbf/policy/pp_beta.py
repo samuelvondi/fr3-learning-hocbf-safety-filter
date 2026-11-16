@@ -215,21 +215,6 @@ class PerPairBetaNet(nn.Module):
         return gamma, beta
 
 
-def build_collision_rows_torch_pp(
-    gamma: torch.Tensor,
-    beta: torch.Tensor,
-    h_all: torch.Tensor,
-    Lf_h_all: torch.Tensor,
-    vrel_sq2_all: torch.Tensor,
-    Lg_psi_all: torch.Tensor,
-    pair_mask: torch.Tensor,
-):
-    """Same rows as build_collision_rows_torch, with beta (B, 43) instead of a shared scalar."""
-    psi_all = Lf_h_all + gamma * h_all
-    Lf_psi_all = vrel_sq2_all + gamma * Lf_h_all
-    return Lg_psi_all, -Lf_psi_all - beta * psi_all, pair_mask
-
-
 def load_pp_policy(path: str) -> PerPairBetaNet:
     ckpt = torch.load(path, map_location="cpu", weights_only=False)
     if ckpt.get("arch") != PP_ARCH:
