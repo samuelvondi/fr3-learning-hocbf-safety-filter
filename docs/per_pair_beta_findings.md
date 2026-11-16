@@ -1,6 +1,6 @@
 # Per-pair β, fallback analysis and training speed — findings
 
-Work from 2026-11-15/16 on branch `dev`. Independent of the paper notes in `paper_alignment.md`. The existing controllers, the published checkpoint and the results in `out/` and `out_nnfb/` are unchanged, and the existing modes reproduce them exactly (§5.3).
+Work from 2026-11-15/16 on branch `dev`. Independent of the paper notes in `paper_alignment.md`. The existing controllers, the published checkpoint and the reference results in `out/` and `out_nnfb/` (local, gitignored; from the 2026-10 alignment run) are unchanged, and the existing modes reproduce them exactly (§5.3). Environment, data folders and verification tools: `dev_notes.md`.
 
 ## 1. Summary
 
@@ -53,12 +53,13 @@ The fallback fires if any pair fails either check. It then sets γ = max(γ_NN, 
 
 - **Exact reproduction:** with the old checkpoint broadcast to β_j = β_NN for all pairs, `nn_pp_beta` and `nn_pp_beta_fallback --pp-fallback-reduce scalar` reproduce `nn` and `nn_g12_fallback` **bit for bit** on 20 benchmark scenarios (28k steps, 73 columns, all summaries). The only exception is the logged mean β, which differs by ≤ 7·10⁻¹⁶ (`np.mean` rounding).
 - `cap_old` with the broadcast old checkpoint also reproduces `nn_g12_fallback` bit for bit, as expected because every fallback is a G1 trigger.
-- The existing modes from the edited comparison script match the committed `out/` and `out_nnfb/` summaries exactly on those 20 scenarios.
+- The existing modes from the edited comparison script match the reference `out/` and `out_nnfb/` summaries exactly on those 20 scenarios.
 - **Per-pair flagging:** checked against a brute-force reference on 240 real states, and on a synthetic case where G2 must fail for exactly one pair.
 
 ### 3.3 Training and checkpoint selection
 
-- 4 seeds (0–3), all with identical settings: 50 epochs × 80 segments, horizon 50, validation every 2 epochs on 20 segments. About 4.5 h each with fast kinematics, run in parallel on one core each.
+- 4 seeds (0–3), all with identical settings: 50 epochs × 80 segments, horizon 50, validation every 2 epochs on 20 segments. About 4.5 h each with fast kinematics (~5 min per epoch incl. validation), run in parallel on one core each. For comparison, the published run took 20.8 h (training epochs only, from its log).
+- Why several seeds: the seed sets the initial weights and which training windows are sampled. One run cannot separate an effect of the method from a lucky or unlucky seed; the spread over 4 seeds can. The old network was trained with a single seed only.
 - **Rule 1 (README §6):** among the "safe" validation epochs (no failed segment, min_h ≥ −10⁻⁶), take the best `normalized_mean_goal_distance`.
 - **Rule 2** (fixed before evaluation): among the safe epochs ≥ 20, take the highest validation min_h.
 - **Why rule 1 is not ideal:**
@@ -93,7 +94,7 @@ Fallback variants for seed 0, rule 1:
 | `cap_old` | 77.8 (358) / 14.6 (67) / 11.3 (52) | 5.7 % |
 | `lower_pair` | 77.2 (355) / 12.8 (59) / 13.7 (63) | 6.0 % |
 
-`keep` flagged no pair at all on any step, which confirms §2. Cap hits are rare and are only γ caps.
+`keep` flagged no pair at all on any step, which confirms §2. Cap hits are rare and are only γ caps. Share of active pairs whose β the fallback changed: 1.59 % for the old NN + Fallback (scalar rule, all active pairs on fallback steps), 7.3 % for `cap_old` and `lower_pair` (seed 0, rule 1), 0 % for `keep`.
 
 ### 3.5 Findings
 
@@ -129,6 +130,7 @@ Fallback variants for seed 0, rule 1:
   - 37× faster per kinematics call and **4.7× faster per training segment** (8.1 → 1.7 s; about 2.8 s with the per-pair head).
   - Weight gradients differ by 10⁻⁴–10⁻². That is the same size as the effect of perturbing the start state by 10⁻¹² in the original code: the gradient through the QP is very sensitive near active constraints. A retraining with fast kinematics is therefore a new run, not a bitwise reproduction.
   - Opt-in via `--fast-kinematics` of `train/train_rollout.py` (default off, so the shared-gain training stays bit-identical to the published run). The per-pair runs above used it.
+- **Profile with fast kinematics** (same 3 segments, 1 thread, 1.9 s per segment): backward pass ~30 %, QP forward (cvxpylayers) ~29 %, pair geometry ~25 %, link kinematics ~6 %, the rest < 2 %. A further speed-up would have to come from the QP layer or the pair geometry; both run per step on tiny tensors, so again not a GPU case.
 - **Another machine:** single-core speed is what counts. A 9th-gen desktop i9 is probably no faster per core than this 12th-gen laptop, though better cooling avoids throttling. Measure with the one-segment profile before moving work.
 
 ## 5. Data and reproduction
@@ -138,7 +140,7 @@ Fallback variants for seed 0, rule 1:
 - **Training rollouts** (`data/rollouts/fullpool_candidates_seed20260520_n1500/`, gitignored, ~14 GB): 966 rollouts = 741 training + 225 validation scenarios of the 1,500-candidate pool (the training JSONL has 1,664 lines because of weighting).
   - The training uses them only for start states and feature statistics. They don't depend on the network, so they are **reusable for any training** with the same split.
   - Regenerate them only if the scenarios, the split or the simulation/controller code changes. With `--skip-existing`, only missing ones are generated (~110 s each, ~1.5 h with 16 workers).
-- **Evaluation benchmark:** the 460 PD-failed scenarios of the separate 1,000-scenario evaluation set. It needs no stored rollouts.
+- **Evaluation benchmark:** the 460 PD-failed scenarios of the separate 1,000-scenario evaluation set. It needs no stored rollouts. One evaluation of 2 controllers on all 460 scenarios takes ~13 min in 20 parallel shards (slower for cautious checkpoints, whose rollouts run longer).
 - **Run outputs** (gitignored): `data/pp_beta_v10/` (seed 0, all evaluations, `selection.json`, `seed_results.csv`, driver scripts) and `data/pp_beta_v10_seed{1,2,3}/`.
 
 ### 5.2 Commands (from `src/`)
@@ -170,6 +172,6 @@ After moving `src/` into the `fr3_hocbf` package (layout in the README):
 - Short training runs of both training scripts give bit-identical epoch logs and weights.
 - The table script, the 3 plots and the per-pair report are byte-identical.
 - All 13 CLIs have the same options.
-- The four existing controllers reproduce the committed `out/` and `out_nnfb/` summaries exactly on 20 benchmark scenarios.
+- The four existing controllers reproduce the reference `out/` and `out_nnfb/` summaries exactly on 20 benchmark scenarios.
 
 The later refactor commits (shared helpers, `policy/` and `differentiable/qp_rows.py` split, training scripts merged into `train_rollout.py --policy`, gain policies moved to `evaluation/gain_policies.py`, combined feature-stats CLI, `build_fullpool_split` CLI) were checked the same way after every commit. A run with non-default `--p1-max/--p2-max` caps and the PD-only runner were checked too, and `build_fullpool_split` gives identical output files on the 966 local rollouts.
