@@ -147,7 +147,7 @@ Fallback variants for seed 0, rule 1:
 # local copies of the split JSONLs with rollout paths under data/ (see data/fr3_fullpool_*_local.jsonl)
 python -m fr3_hocbf.dataset.generate_scenario_data --scenario-dir <dir of the 966 YAMLs> \
   --output-dir ../data/rollouts/fullpool_candidates_seed20260520_n1500 --workers 16 --skip-existing
-python -m fr3_hocbf.dataset.compute_pp_feature_stats \
+python -m fr3_hocbf.dataset.compute_feature_stats --kind per_pair \
   --rollout-labeled ../data/fr3_fullpool_train_weighted_local.jsonl --out <pp_stats.npz>
 # training: README section 5.5 arguments plus
 python -m fr3_hocbf.train.train_rollout <README 5.5 args> --policy per_pair --fast-kinematics \

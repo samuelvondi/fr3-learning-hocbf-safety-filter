@@ -689,7 +689,7 @@ def main():
         default="shared",
         help="shared: P12ParamNet (one gamma, one beta). per_pair: PerPairBetaNet (one gamma, beta_j per pair row).",
     )
-    parser.add_argument("--pp-stats-in", type=str, default=None, help="per_pair: per-pair feature stats .npz (dataset.compute_pp_feature_stats)")
+    parser.add_argument("--pp-stats-in", type=str, default=None, help="per_pair: per-pair feature stats .npz (dataset.compute_feature_stats --kind per_pair)")
     parser.add_argument("--pair-embed-dim", type=int, default=8, help="per_pair: size of the learned pair embedding")
     parser.add_argument("--pp-head-hidden", type=int, default=64, help="per_pair: hidden width of the shared beta head")
     parser.add_argument(
