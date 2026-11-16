@@ -63,20 +63,22 @@ from fr3_hocbf.differentiable.qp_layer import (
     solve_bound_slack_qp_batch,
 )
 from fr3_hocbf.train.config import DT_DEFAULT, RolloutTrainCfg
-from fr3_hocbf.train.train_rollout import (
+from fr3_hocbf.train.checkpointing import (
     aggregate_stats,
-    clone_obstacles_torch,
-    compute_nominal_detached,
     guard_against_accidental_overwrite,
     is_safe_enough,
     make_candidate_summary_row,
-    obstacles_numpy_to_torch,
     safe_candidate_checkpoint_path,
-    topk_positive_violation_sq_loss,
     track_metric_from_epoch,
+    write_candidate_summaries,
+)
+from fr3_hocbf.train.train_rollout import (
+    clone_obstacles_torch,
+    compute_nominal_detached,
+    obstacles_numpy_to_torch,
+    topk_positive_violation_sq_loss,
     update_obstacles_torch,
     violation_frequency_loss_from_sq,
-    write_candidate_summaries,
 )
 from fr3_hocbf.policy.features import INPUT_DIM, build_feature_vector, load_feature_stats, normalize_features_torch
 from fr3_hocbf.policy.pp_beta import (
