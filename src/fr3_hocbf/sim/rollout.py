@@ -8,6 +8,7 @@ import pinocchio as pin
 
 from fr3_hocbf.sim.geometry import CapsuleKinematics, compute_pair_geometry
 from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
+from fr3_hocbf.sim.qp_data import get_joint_limits
 from fr3_hocbf.sim.qp_solver import (
     h_func,
     Lf_h,
@@ -75,27 +76,6 @@ def get_self_collision_link_pair():
         ("link2", "end_effector"),
         ("link2", "forearm1"),
     ]
-
-
-def get_joint_limits():
-    ddq_max_scalar = 40.0
-    ddq_max_arm = np.full(NUM_ARM_JOINTS, ddq_max_scalar)
-    ddq_min_arm = np.full(NUM_ARM_JOINTS, -ddq_max_scalar)
-
-    dq_max_arm = np.array([2.0, 1.0, 1.5, 1.25, 3.0, 1.5, 3.0])
-    dq_min_arm = -dq_max_arm
-
-    q_max_arm = np.array([2.7437, 1.7837, 2.9007, -0.1518, 2.8065, 4.5169, 3.0159])
-    q_min_arm = np.array([-2.7437, -1.7837, -2.9007, -3.0421, -2.8065, 0.5445, -3.0159])
-
-    return {
-        "ddq_max_arm": ddq_max_arm,
-        "ddq_min_arm": ddq_min_arm,
-        "dq_max_arm": dq_max_arm,
-        "dq_min_arm": dq_min_arm,
-        "q_max_arm": q_max_arm,
-        "q_min_arm": q_min_arm,
-    }
 
 
 def get_default_initial_q():
