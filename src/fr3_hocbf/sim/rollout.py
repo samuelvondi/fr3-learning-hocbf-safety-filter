@@ -10,7 +10,6 @@ from fr3_hocbf.sim.geometry import CapsuleKinematics, compute_pair_geometry
 from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
 from fr3_hocbf.sim.qp_data import get_joint_limits
 from fr3_hocbf.sim.qp_solver import (
-    h_func,
     Lf_h,
     psi_func,
     solve_hocbf_qp_standalone,

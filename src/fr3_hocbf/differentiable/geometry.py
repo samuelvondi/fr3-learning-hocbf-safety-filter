@@ -9,7 +9,6 @@ import torch
 from fr3_hocbf.differentiable.kinematics import (
     NUM_ARM_JOINTS,
     ACTIVE_LINKS_DEF,
-    EE_FRAME_NAME,
 )
 
 

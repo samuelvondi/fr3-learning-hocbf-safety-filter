@@ -60,7 +60,6 @@ from fr3_hocbf.sim.rollout import (
 from fr3_hocbf.sim.nominal_controller import nominal_controller_js_standalone
 from fr3_hocbf.sim.qp_data import (
     NUM_PAIR_ROWS,
-    NUM_BOUND_ROWS,
     NUM_TOTAL_ROWS,
     build_full_qp_numpy,
 )
