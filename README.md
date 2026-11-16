@@ -200,6 +200,9 @@ imported as `pinocchio`), `pyyaml`, plus the pinned solver stack (`osqp`,
 
 > If the Pinocchio wheel fails: `conda install -c conda-forge pinocchio`
 
+For development, `pip install -r requirements-dev.txt` adds `pyflakes` on top
+(lint from `src/` with `python -m pyflakes fr3_hocbf`).
+
 ### `.gitignore` note
 
 The repository ignores `src/*.pt`, `src/*.jsonl`, `src/*.txt`, `src/*.npz`,

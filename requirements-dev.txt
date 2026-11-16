@@ -1,0 +1,8 @@
+# Development tools on top of the pinned runtime environment (not needed to run the pipeline).
+#
+#   pip install -r requirements-dev.txt
+#
+# Lint before committing (from src/):  python -m pyflakes fr3_hocbf
+
+-r requirements.txt
+pyflakes       == 4.0.3
