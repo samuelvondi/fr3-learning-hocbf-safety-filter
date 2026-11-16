@@ -29,7 +29,7 @@ Main changes versus the first prototype:
     6) Saves every checkpoint that passes the safe-given-track gate for later offline comparison.
 
 Example:
-    python fr3_train_rollout.py \
+    python -m fr3_hocbf.train.train_rollout \
       ~/davide_fr3_ws/src/cbf_safety_filter/config/generated_scenarios \
       --rollout-dir ~/davide_fr3_ws/src/cbf_safety_filter/data/rollouts/good_200 \
       --sample-start-from-rollout \

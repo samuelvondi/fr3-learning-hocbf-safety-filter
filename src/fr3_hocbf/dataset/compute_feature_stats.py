@@ -12,7 +12,7 @@ This version is intended for the 114D feature vector:
     h_all,
     Lf_h_all
 
-It imports build_raw_feature_matrix from fr3_train_rollout.py, so run this
+It imports build_raw_feature_matrix from fr3_hocbf/train/train_rollout.py, so run this
 after replacing that training file with the updated 114D version.
 """
 
@@ -23,7 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
-from fr3_train_rollout import build_raw_feature_matrix
+from fr3_hocbf.train.train_rollout import build_raw_feature_matrix
 
 
 def read_jsonl_rollout_paths(path: str) -> list[str]:

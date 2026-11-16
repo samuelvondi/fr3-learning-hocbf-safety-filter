@@ -236,10 +236,10 @@ unique and never duplicated; train/val overlap is 0.
 | Double integrator, capsule barrier (Eq. 2–4) | `fr3_hocbf/sim/geometry.py`, `fr3_hocbf/differentiable/geometry.py` |
 | ψ, second-order condition, hard QP (Eq. 5–10) | `fr3_hocbf/sim/qp_solver.py` |
 | 43 collision rows | `fr3_hocbf/sim/qp_data.py` |
-| Gain policy π_θ, 114-D features (Eq. 11–14) | `fr3_train_rollout.py` |
+| Gain policy π_θ, 114-D features (Eq. 11–14) | `fr3_hocbf/train/train_rollout.py` |
 | Feature normalization (Eq. 13) | `fr3_hocbf/dataset/compute_feature_stats.py` |
 | Differentiable QP with bound slack (Eq. 18–19) | `fr3_hocbf/differentiable/qp_layer.py` |
-| Losses (Eq. 15–20) | `fr3_train_rollout.py` |
+| Losses (Eq. 15–20) | `fr3_hocbf/train/train_rollout.py` |
 | Split before oversampling (Sec. II-C) | `fr3_hocbf/dataset/build_fullpool_split.py` |
 | Runtime fallback (Eq. 21–24) | `fr3_compare_rollout_policies.py` |
 | Closed-loop rollout, 50 Hz (Sec. III-C) | `fr3_hocbf/sim/rollout.py` |
@@ -264,7 +264,7 @@ Only needed to retrain from scratch. To reproduce the published tables, use §1.
 | `artifacts/results/fr3_pd_only_all1000_failed_scenarios.txt` | all | absolute scenario paths — rewrite as in §1 step 2 |
 
 Docstring examples in `fr3_compare_rollout_policies.py` and
-`fr3_train_rollout.py` also show `~/davide_fr3_ws/...` paths; these are comments
+`fr3_hocbf/train/train_rollout.py` also show `~/davide_fr3_ws/...` paths; these are comments
 only and do not affect execution. The URDF is resolved relative to the repository
 root, so it needs no configuration.
 
@@ -336,7 +336,7 @@ Configuration of the published model, recovered from the checkpoint's embedded
 `cfg`:
 
 ```bash
-python fr3_train_rollout.py \
+python -m fr3_hocbf.train.train_rollout \
   config/generated_scenarios_fullpool_candidates \
   --rollout-labeled <split_dir>/fr3_fullpool_train_weighted.jsonl \
   --val-rollout-labeled <split_dir>/fr3_fullpool_val_unique.jsonl \

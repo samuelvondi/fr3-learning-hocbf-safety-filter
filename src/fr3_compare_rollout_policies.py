@@ -68,7 +68,7 @@ from fr3_hocbf.sim.qp_data import (
     NUM_TOTAL_ROWS,
     build_full_qp_numpy,
 )
-from fr3_train_rollout import P12ParamNet, normalize_features_numpy
+from fr3_hocbf.train.train_rollout import P12ParamNet, normalize_features_numpy
 
 
 OPTIMAL_STATUSES = {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}
