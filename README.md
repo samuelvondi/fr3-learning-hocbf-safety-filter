@@ -274,7 +274,6 @@ Only needed to retrain from scratch. To reproduce the published tables, use §1.
 
 | File | Line | What to change |
 |---|---|---|
-| `fr3_hocbf/dataset/build_fullpool_split.py` | 14 | `SRC = Path("/home/simon/davide_fr3_ws/src/cbf_safety_filter")` → your repo root |
 | `artifacts/results/fr3_pd_only_all1000_failed_scenarios.txt` | all | absolute scenario paths — rewrite as in §1 step 2 |
 
 Docstring examples in `fr3_hocbf/evaluation/compare_rollout_policies.py` and
@@ -308,7 +307,7 @@ checkpoint.
 ### 5.3 Build the split
 
 ```bash
-python -m fr3_hocbf.dataset.build_fullpool_split     # fix the hardcoded path first
+python -m fr3_hocbf.dataset.build_fullpool_split     # defaults: data/rollouts/..., config/..., see --help
 ```
 
 The 741-scenario selection is reproducible **without re-running any rollouts**.
