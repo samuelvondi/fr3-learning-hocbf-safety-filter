@@ -24,6 +24,8 @@ Supported modes:
   davide_online Davide-style dynamic gamma,beta update
   nn              trained P12ParamNet, pure prediction without fallback
   nn_g12_fallback trained P12ParamNet protected by an independent minimal G12 fallback
+  nn_pp_beta          trained PerPairBetaNet (shared gamma, per-pair beta_j), no fallback
+  nn_pp_beta_fallback PerPairBetaNet with the G12 fallback applied per pair (--pp-model)
 
 Recommended first smoke test:
   python compare_rollout_policies.py \
@@ -69,6 +71,7 @@ from fr3_hocbf.sim.qp_data import (
     build_full_qp_numpy,
 )
 from fr3_hocbf.train.train_rollout import P12ParamNet, normalize_features_numpy
+from fr3_hocbf.train.pp_beta import PP_ARCH, load_pp_policy
 
 
 OPTIMAL_STATUSES = {cp.OPTIMAL, cp.OPTIMAL_INACCURATE}
@@ -585,6 +588,213 @@ def build_and_solve_hard_qp_for_p12(
 
 
 # ---------------------------------------------------------------------
+# Per-pair beta policy (modes nn_pp_beta, nn_pp_beta_fallback)
+# ---------------------------------------------------------------------
+def load_pp_pack(model_path: str, stats_path: str | None, args):
+    """
+    PerPairBetaNet checkpoint -> ("pp", model, feat_mean, feat_std).
+
+    An old P12ParamNet checkpoint is accepted as well -> ("broadcast", nn_pack):
+    beta_j = shared beta_NN for all pairs. Used for the sanity check that the
+    per-pair path reproduces nn / nn_g12_fallback exactly.
+    """
+    ckpt = torch.load(os.path.expanduser(model_path), map_location="cpu", weights_only=False)
+    if isinstance(ckpt, dict) and ckpt.get("arch") == PP_ARCH:
+        model, feat_mean, feat_std = load_pp_policy(os.path.expanduser(model_path))
+        return ("pp", model, feat_mean, feat_std)
+    return ("broadcast", load_nn_policy(model_path, stats_path, args.hidden_dim, args.p1_floor, args.p2_floor))
+
+
+@torch.no_grad()
+def predict_pp_current(
+    pp_pack,
+    q_arm: np.ndarray,
+    dq_arm: np.ndarray,
+    ddq_nominal_arm: np.ndarray,
+    joint_limits: dict,
+    all_pair_terms: dict,
+    dt: float,
+) -> tuple[float, np.ndarray]:
+    """Return gamma (scalar) and beta (43,) for the current state."""
+    if pp_pack[0] == "broadcast":
+        nn_model, feat_mean, feat_std = pp_pack[1]
+        p1, p2 = predict_p12_nn_current(
+            model=nn_model,
+            feat_mean=feat_mean,
+            feat_std=feat_std,
+            q_arm=q_arm,
+            dq_arm=dq_arm,
+            ddq_nominal_arm=ddq_nominal_arm,
+            joint_limits=joint_limits,
+            h_all=all_pair_terms["h_all"].copy(),
+            Lf_h_all=all_pair_terms["Lf_h_all"].copy(),
+        )
+        return p1, np.full(NUM_PAIR_ROWS, p2, dtype=float)
+
+    _, model, feat_mean, feat_std = pp_pack
+    ddq_nominal_arm = np.asarray(ddq_nominal_arm, dtype=float).reshape(NUM_ARM_JOINTS)
+    ddq_scale = np.clip(
+        np.maximum(np.abs(np.asarray(joint_limits["ddq_min_arm"], dtype=float)), np.abs(np.asarray(joint_limits["ddq_max_arm"], dtype=float))),
+        1e-6,
+        None,
+    )
+    z_raw = np.concatenate(
+        [q_arm, dq_arm, ddq_nominal_arm, ddq_nominal_arm / ddq_scale, all_pair_terms["h_all"], all_pair_terms["Lf_h_all"]]
+    )[None, :]
+    z_t = torch.tensor(normalize_features_numpy(z_raw, feat_mean, feat_std), dtype=torch.double)
+    ddq_min_kin, ddq_max_kin = kinematic_ddq_bounds(q_arm, dq_arm, joint_limits, dt)
+
+    def t(x):
+        return torch.tensor(np.asarray(x, dtype=float), dtype=torch.double).unsqueeze(0)
+
+    gamma, beta = model(
+        z_t,
+        {
+            "h_all": t(all_pair_terms["h_all"]),
+            "Lf_h_all": t(all_pair_terms["Lf_h_all"]),
+            "vrel_sq2_all": t(all_pair_terms["vrel_sq2_all"]),
+            "Lg_psi_all": t(all_pair_terms["Lg_psi_all"]),
+            "pair_mask": t(all_pair_terms["pair_mask"]),
+            "u_nom": t(ddq_nominal_arm),
+            "ddq_min_kin": t(ddq_min_kin),
+            "ddq_max_kin": t(ddq_max_kin),
+        },
+    )
+    return float(gamma[0, 0]), beta[0].numpy().astype(float)
+
+
+def pp_g12_fallback_current(
+    q_arm: np.ndarray,
+    dq_arm: np.ndarray,
+    all_pair_terms: dict,
+    limits: dict,
+    dt: float,
+    gamma_nn: float,
+    beta_nn: np.ndarray,
+    pair_scope: str,
+    tol: float,
+    p1_floor: float,
+    p2_floor: float,
+    reduce: str = "per_pair",
+    unflagged: str = "keep",
+) -> dict:
+    """
+    G12 fallback for a per-pair beta vector.
+
+    Pre-QP check: same G1/G2 rows as g12_check_current, but G2_j uses beta_NN_j.
+    If it holds, the NN gains are kept. Otherwise:
+      gamma: unchanged rule, gamma_final = max(gamma_NN, gamma_req + 0.5) (capped).
+      reduce="scalar": exactly the existing fallback (beta_req reduced by max over
+          pairs, applied to every pair). Sanity-check path.
+      reduce="per_pair": G2_j is re-checked with gamma_final and beta_NN_j; pairs that
+          fail get beta_j = max(p2_floor, beta_req_j + 0.5) (capped). Unflagged pairs:
+            unflagged="keep":       beta_NN_j
+            unflagged="lower_pair": min(beta_NN_j, max(p2_floor, beta_req_j + 0.5)) for psi_j > 0
+            unflagged="cap_old":    min(beta_NN_j, B), B = the existing scalar fallback beta
+                                    (max over pairs of beta_req + 0.5). Equals the existing
+                                    fallback when all beta_NN_j are equal and B <= beta_NN.
+    """
+    h_all = np.asarray(all_pair_terms["h_all"], dtype=float).reshape(NUM_PAIR_ROWS)
+    Lf_h_all = np.asarray(all_pair_terms["Lf_h_all"], dtype=float).reshape(NUM_PAIR_ROWS)
+    vrel_sq2_all = np.asarray(all_pair_terms["vrel_sq2_all"], dtype=float).reshape(NUM_PAIR_ROWS)
+    Lg_psi_all = np.asarray(all_pair_terms["Lg_psi_all"], dtype=float).reshape(NUM_PAIR_ROWS, NUM_ARM_JOINTS)
+    active = pair_scope_mask(all_pair_terms["pair_mask"], pair_scope)
+    beta_nn = np.asarray(beta_nn, dtype=float).reshape(NUM_PAIR_ROWS)
+
+    ddq_min_kin, ddq_max_kin = kinematic_ddq_bounds(q_arm, dq_arm, limits, dt)
+    S_sup_all = np.sum(np.where(Lg_psi_all >= 0.0, Lg_psi_all * ddq_max_kin, Lg_psi_all * ddq_min_kin), axis=1)
+
+    psi_nn = Lf_h_all + float(gamma_nn) * h_all
+    g1_rows = active & (h_all > EPSILON_DENOMINATOR)
+    g2_rows = active & (psi_nn > EPSILON_DENOMINATOR)
+    g2_nn = vrel_sq2_all + float(gamma_nn) * Lf_h_all + S_sup_all + beta_nn * psi_nn
+    min_g1 = float(np.min(psi_nn[g1_rows])) if np.any(g1_rows) else float("nan")
+    min_g2 = float(np.min(g2_nn[g2_rows])) if np.any(g2_rows) else float("nan")
+
+    no_pairs = np.zeros(NUM_PAIR_ROWS, dtype=bool)
+    out = {
+        "gamma": float(gamma_nn),
+        "beta": beta_nn.copy(),
+        "fallback_used": False,
+        "fallback_reason": "",
+        "min_g1_candidate": min_g1,
+        "min_g2_candidate": min_g2,
+        "max_gamma_required": float("nan"),
+        "max_beta_required": float("nan"),
+        "fb_pairs": no_pairs.copy(),
+        "lowered_pairs": no_pairs.copy(),
+        "beta_cap_pairs": no_pairs.copy(),
+        "gamma_cap_hit": False,
+    }
+    if g12_values_hold(min_g1=min_g1, min_g2=min_g2, tol=tol):
+        return out
+
+    out["fallback_used"] = True
+    out["fallback_reason"] = "G1_negative" if (np.isfinite(min_g1) and min_g1 < -float(tol)) else "G2_sup_negative"
+
+    gamma, beta_scalar, max_gamma_required, max_beta_required = minimal_g12_p12_current(
+        q_arm=q_arm,
+        dq_arm=dq_arm,
+        all_pair_terms=all_pair_terms,
+        limits=limits,
+        dt=dt,
+        p1_floor=max(float(p1_floor), float(gamma_nn)),
+        p2_floor=float(p2_floor),
+        pair_scope=pair_scope,
+    )
+    out["gamma"] = float(gamma)
+    out["max_gamma_required"] = float(max_gamma_required)
+    out["gamma_cap_hit"] = bool(np.isfinite(max_gamma_required) and max_gamma_required + GAMMA_ADJUST_BUFFER > GAMMA_MAX_LIMIT)
+
+    if reduce == "scalar":
+        out["beta"] = np.full(NUM_PAIR_ROWS, float(beta_scalar), dtype=float)
+        out["max_beta_required"] = float(max_beta_required)
+        out["fb_pairs"] = active.copy()
+        cap = bool(np.isfinite(max_beta_required) and max_beta_required + BETA_ADJUST_BUFFER > BETA_MAX_LIMIT)
+        out["beta_cap_pairs"] = active & cap
+        return out
+    if reduce != "per_pair":
+        raise ValueError(f"Unknown pp fallback reduce: {reduce}")
+
+    # Per pair, against gamma_final. psi_j <= 0 rows are skipped as in eq. 23.
+    psi = Lf_h_all + gamma * h_all
+    Lf_psi = vrel_sq2_all + gamma * Lf_h_all
+    rows = active & (psi > EPSILON_DENOMINATOR)
+    beta_req = np.full(NUM_PAIR_ROWS, -np.inf)
+    beta_req[rows] = -(Lf_psi[rows] + S_sup_all[rows]) / psi[rows]
+    g2 = Lf_psi + S_sup_all + beta_nn * psi
+    flagged = rows & (g2 < -float(tol))
+    target = np.minimum(np.maximum(float(p2_floor), np.maximum(0.0, beta_req + BETA_ADJUST_BUFFER)), BETA_MAX_LIMIT)
+
+    beta = beta_nn.copy()
+    beta[flagged] = target[flagged]
+    lowered = no_pairs.copy()
+    if unflagged == "lower_pair":
+        lowered = rows & ~flagged & (target < beta_nn)
+        beta[lowered] = target[lowered]
+    elif unflagged == "cap_old":
+        lowered = active & ~flagged & (float(beta_scalar) < beta_nn)
+        beta[lowered] = float(beta_scalar)
+    elif unflagged != "keep":
+        raise ValueError(f"Unknown pp unflagged rule: {unflagged}")
+
+    out["beta"] = beta
+    out["fb_pairs"] = flagged
+    out["lowered_pairs"] = lowered
+    out["beta_cap_pairs"] = flagged & (beta_req + BETA_ADJUST_BUFFER > BETA_MAX_LIMIT)
+    out["max_beta_required"] = float(np.max(beta_req[rows])) if np.any(rows) else float("nan")
+    return out
+
+
+def _pairs_str(mask: np.ndarray) -> str:
+    return ";".join(str(int(j)) for j in np.flatnonzero(mask))
+
+
+def _pair_values_str(values: np.ndarray, mask: np.ndarray) -> str:
+    return ";".join(f"{int(j)}:{float(values[j]):.6g}" for j in np.flatnonzero(mask))
+
+
+# ---------------------------------------------------------------------
 # rollout simulation
 # ---------------------------------------------------------------------
 def ee_position(model, data, ee_frame_id: int, q_full: np.ndarray, dq_full: np.ndarray | None = None) -> np.ndarray:
@@ -602,6 +812,8 @@ def rollout_one_policy(
     mode: str,
     args,
     nn_pack=None,
+    pp_pack=None,
+    pp_log: list[dict] | None = None,
 ) -> tuple[dict, list[dict]]:
     model = context["model"]
     data = model.createData()
@@ -691,6 +903,7 @@ def rollout_one_policy(
         p2_fallback = float("nan")
         min_g1_candidate = float("nan")
         min_g2_candidate = float("nan")
+        pp_step = None
 
         if mode == "original":
             p1 = initial_gamma
@@ -776,8 +989,70 @@ def rollout_one_policy(
                     )
                     p1_fallback = float(p1)
                     p2_fallback = float(p2)
+        elif mode in ("nn_pp_beta", "nn_pp_beta_fallback"):
+            if pp_pack is None:
+                raise RuntimeError("Per-pair modes require --pp-model")
+            gamma_nn, beta_nn = predict_pp_current(
+                pp_pack=pp_pack,
+                q_arm=q_arm,
+                dq_arm=dq_arm,
+                ddq_nominal_arm=ddq_nominal,
+                joint_limits=joint_limits,
+                all_pair_terms=all_pair_terms,
+                dt=dt,
+            )
+            pp_step = {
+                "gamma": gamma_nn,
+                "beta": beta_nn,
+                "fb_pairs": np.zeros(NUM_PAIR_ROWS, dtype=bool),
+                "lowered_pairs": np.zeros(NUM_PAIR_ROWS, dtype=bool),
+                "beta_cap_pairs": np.zeros(NUM_PAIR_ROWS, dtype=bool),
+                "gamma_cap_hit": False,
+            }
+            if mode == "nn_pp_beta_fallback":
+                pp_step = pp_g12_fallback_current(
+                    q_arm=q_arm,
+                    dq_arm=dq_arm,
+                    all_pair_terms=all_pair_terms,
+                    limits=joint_limits,
+                    dt=dt,
+                    gamma_nn=gamma_nn,
+                    beta_nn=beta_nn,
+                    pair_scope=args.g12_fallback_pair_scope,
+                    tol=args.g12_fallback_tol,
+                    p1_floor=args.g12_fallback_p1_floor,
+                    p2_floor=args.g12_fallback_p2_floor,
+                    reduce=args.pp_fallback_reduce,
+                    unflagged=args.pp_unflagged,
+                )
+                fallback_used = pp_step["fallback_used"]
+                fallback_reason = pp_step["fallback_reason"]
+                min_g1_candidate = pp_step["min_g1_candidate"]
+                min_g2_candidate = pp_step["min_g2_candidate"]
+                max_gamma_required = pp_step["max_gamma_required"]
+                max_beta_required = pp_step["max_beta_required"]
+                if fallback_used:
+                    fallback_count += 1
+            p1 = float(pp_step["gamma"])
+            p2 = pp_step["beta"]  # (43,): HOCBF row j uses beta_j
+            p1_nn = float(gamma_nn)
+            if fallback_used:
+                p1_fallback = p1
         else:
             raise ValueError(f"Unknown mode: {mode}")
+
+        # Scalar beta for the step log; per-pair modes log the mean over active pairs
+        # (all pairs if none is active) and write beta_j to the separate pp step log.
+        if np.ndim(p2) == 0:
+            p2_log = float(p2)
+        else:
+            pair_active_pre = np.asarray(all_pair_terms["pair_mask"]) > 0.5
+            p2_log = float(np.mean(p2[pair_active_pre])) if np.any(pair_active_pre) else float(np.mean(p2))
+            p2_nn = (
+                float(np.mean(beta_nn[pair_active_pre])) if np.any(pair_active_pre) else float(np.mean(beta_nn))
+            )
+            if fallback_used:
+                p2_fallback = p2_log
 
         (
             u_nom,
@@ -893,7 +1168,7 @@ def rollout_one_policy(
                 "qp_solved": bool(qp_solved),
                 "qp_status": qp_status,
                 "p1": float(p1),
-                "p2": float(p2),
+                "p2": p2_log,
                 "p1_nn": p1_nn,
                 "p2_nn": p2_nn,
                 "p1_fallback": p1_fallback,
@@ -964,6 +1239,30 @@ def rollout_one_policy(
                 "ddq_safe6": float(ddq_safe[6]),
             }
         )
+
+        if pp_step is not None and pp_log is not None:
+            pair_active_pre = np.asarray(all_pair_terms["pair_mask"]) > 0.5
+            pp_log.append(
+                {
+                    "scenario": Path(scenario_path).stem,
+                    "mode": mode,
+                    "step": k,
+                    "gamma": float(p1),
+                    "gamma_nn": p1_nn,
+                    "fallback_used": bool(fallback_used),
+                    "gamma_raised": bool(p1 > p1_nn),
+                    "gamma_cap_hit": bool(pp_step["gamma_cap_hit"]),
+                    "n_active": int(np.sum(pair_active_pre)),
+                    "n_fb_pairs": int(np.sum(pp_step["fb_pairs"])),
+                    "fb_pairs": _pairs_str(pp_step["fb_pairs"]),
+                    "n_lowered_pairs": int(np.sum(pp_step["lowered_pairs"])),
+                    "lowered_pairs": _pairs_str(pp_step["lowered_pairs"]),
+                    "n_beta_cap_pairs": int(np.sum(pp_step["beta_cap_pairs"])),
+                    "beta_cap_pairs": _pairs_str(pp_step["beta_cap_pairs"]),
+                    "beta_active": _pair_values_str(p2, pair_active_pre),
+                    "beta_nn_active": _pair_values_str(beta_nn, pair_active_pre),
+                }
+            )
 
         if dist_to_goal < float(scenario["goal_tolerance"]):
             at_goal_timer += dt
@@ -1061,7 +1360,7 @@ def write_json(path: str, obj):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("scenarios", nargs="+", help="Scenario YAML(s), directories, globs, or txt files")
-    parser.add_argument("--modes", type=str, default="original,davide_online,fixed", help="Comma-separated modes. Valid: original,fixed,davide_online,nn,nn_g12_fallback")
+    parser.add_argument("--modes", type=str, default="original,davide_online,fixed", help="Comma-separated modes. Valid: original,fixed,davide_online,nn,nn_g12_fallback,nn_pp_beta,nn_pp_beta_fallback")
 
     parser.add_argument("--p1-fixed", type=float, default=2.0)
     parser.add_argument("--p2-fixed", type=float, default=3.0)
@@ -1099,6 +1398,29 @@ def main():
     parser.add_argument("--g12-fallback-p1-floor", type=float, default=1e-3)
     parser.add_argument("--g12-fallback-p2-floor", type=float, default=1e-3)
 
+    parser.add_argument(
+        "--pp-model",
+        type=str,
+        default=None,
+        help="PerPairBetaNet checkpoint for modes nn_pp_beta and nn_pp_beta_fallback. An old P12ParamNet "
+        "checkpoint is broadcast to beta_j = beta_NN (sanity check).",
+    )
+    parser.add_argument(
+        "--pp-fallback-reduce",
+        choices=["per_pair", "scalar"],
+        default="per_pair",
+        help="nn_pp_beta_fallback: per_pair applies beta_req_j to the flagged pairs only; scalar reproduces the "
+        "existing fallback (max over pairs, applied to all pairs).",
+    )
+    parser.add_argument(
+        "--pp-unflagged",
+        choices=["keep", "lower_pair", "cap_old"],
+        default="keep",
+        help="nn_pp_beta_fallback, per_pair: beta of pairs that pass the G2 re-check on fallback steps. "
+        "keep: beta_NN_j; lower_pair: min(beta_NN_j, beta_req_j + buffer); "
+        "cap_old: min(beta_NN_j, existing scalar fallback beta).",
+    )
+
     parser.add_argument("--dt", type=float, default=1.0 / 50.0)
     parser.add_argument("--max-steps", type=int, default=None, help="Debug cap. Default uses scenario max_sim_duration_s")
     parser.add_argument("--limit-scenarios", type=int, default=None)
@@ -1128,7 +1450,7 @@ def main():
         raise RuntimeError("No scenario YAML files found.")
 
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
-    valid_modes = {"original", "fixed", "davide_online", "nn", "nn_g12_fallback"}
+    valid_modes = {"original", "fixed", "davide_online", "nn", "nn_g12_fallback", "nn_pp_beta", "nn_pp_beta_fallback"}
     for m in modes:
         if m not in valid_modes:
             raise ValueError(f"Unknown mode {m}. Valid: {sorted(valid_modes)}")
@@ -1147,6 +1469,14 @@ def main():
         print(f"loaded NN model = {args.model}")
         print(f"loaded NN stats = {args.stats}")
 
+    pp_pack = None
+    if any(m in modes for m in ("nn_pp_beta", "nn_pp_beta_fallback")):
+        if args.pp_model is None:
+            raise ValueError("Modes nn_pp_beta and nn_pp_beta_fallback require --pp-model")
+        pp_pack = load_pp_pack(args.pp_model, args.stats, args)
+        print(f"loaded per-pair model = {args.pp_model} ({pp_pack[0]})")
+        print(f"pp fallback reduce = {args.pp_fallback_reduce}, unflagged = {args.pp_unflagged}")
+
     print(f"num_scenarios = {len(scenario_paths)}")
     for p in scenario_paths[:10]:
         print("  ", p)
@@ -1158,6 +1488,7 @@ def main():
 
     all_summaries: list[dict] = []
     all_rows: list[dict] = []
+    all_pp_rows: list[dict] = []
 
     total_t0 = time.time()
     for scen_i, scenario_path in enumerate(scenario_paths):
@@ -1169,6 +1500,8 @@ def main():
                 mode=mode,
                 args=args,
                 nn_pack=nn_pack,
+                pp_pack=pp_pack,
+                pp_log=all_pp_rows,
             )
             all_summaries.append(summary)
             all_rows.extend(rows)
@@ -1189,6 +1522,10 @@ def main():
 
     write_csv(summary_csv, all_summaries)
     write_csv(rows_csv, all_rows)
+    if all_pp_rows:
+        pp_rows_csv = f"{args.out_prefix}_pp_steps.csv"
+        write_csv(pp_rows_csv, all_pp_rows)
+        print(f"wrote pp step CSV:  {pp_rows_csv}")
     write_json(
         summary_json,
         {
