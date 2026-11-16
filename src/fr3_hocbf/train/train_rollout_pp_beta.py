@@ -47,6 +47,7 @@ import numpy as np
 import torch
 
 from fr3_hocbf.common_io import expand_scenario_inputs
+from fr3_hocbf.dataset.rollout_records import build_scenario_map, expand_labeled_rollout_inputs, sample_start_state_from_rollout, summarize_rollout_records
 from fr3_hocbf.sim.rollout import NUM_ARM_JOINTS, ee_position, get_default_initial_state, load_scenario_yaml, make_rollout_context
 from fr3_hocbf.differentiable.kinematics import EE_FRAME_NAME, load_fr3_torch_kinematics
 from fr3_hocbf.differentiable.kinematics_fast import load_fr3_torch_kinematics_fast
@@ -65,17 +66,13 @@ from fr3_hocbf.train.train_rollout import (
     DT_DEFAULT,
     RolloutTrainCfg,
     aggregate_stats,
-    build_scenario_map,
     clone_obstacles_torch,
     compute_nominal_detached,
-    expand_labeled_rollout_inputs,
     guard_against_accidental_overwrite,
     is_safe_enough,
     make_candidate_summary_row,
     obstacles_numpy_to_torch,
     safe_candidate_checkpoint_path,
-    sample_start_state_from_rollout,
-    summarize_rollout_records,
     topk_positive_violation_sq_loss,
     track_metric_from_epoch,
     update_obstacles_torch,
