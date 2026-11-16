@@ -237,15 +237,15 @@ unique and never duplicated; train/val overlap is 0.
 | ψ, second-order condition, hard QP (Eq. 5–10) | `fr3_hocbf/sim/qp_solver.py` |
 | 43 collision rows | `fr3_hocbf/sim/qp_data.py` |
 | Gain policy π_θ, 114-D features (Eq. 11–14) | `fr3_train_rollout.py` |
-| Feature normalization (Eq. 13) | `fr3_compute_feature_stats_ddqnorm.py` |
+| Feature normalization (Eq. 13) | `fr3_hocbf/dataset/compute_feature_stats.py` |
 | Differentiable QP with bound slack (Eq. 18–19) | `fr3_hocbf/differentiable/qp_layer.py` |
 | Losses (Eq. 15–20) | `fr3_train_rollout.py` |
-| Split before oversampling (Sec. II-C) | `fr3_build_fullpool_split.py` |
+| Split before oversampling (Sec. II-C) | `fr3_hocbf/dataset/build_fullpool_split.py` |
 | Runtime fallback (Eq. 21–24) | `fr3_compare_rollout_policies.py` |
 | Closed-loop rollout, 50 Hz (Sec. III-C) | `fr3_hocbf/sim/rollout.py` |
 | Nominal controller (Sec. III-B) | `fr3_hocbf/sim/nominal_controller.py` |
-| Scenario generation (Sec. III-D) | `fr3_generate_candidate_scenarios.py` |
-| PD-failed subset, 460 (Sec. III-F) | `fr3_run_pd_only_scenarios.py` |
+| Scenario generation (Sec. III-D) | `fr3_hocbf/dataset/generate_candidate_scenarios.py` |
+| PD-failed subset, 460 (Sec. III-F) | `fr3_hocbf/dataset/run_pd_only_scenarios.py` |
 | Tables I–III | `fr3_make_final_metric_tables_generic_fixed.py` |
 | Fig. 4 | `fr3_plot_compare_results.py` |
 | Appendix A kinematics / Jacobians | `fr3_hocbf/differentiable/kinematics.py` |
@@ -260,7 +260,7 @@ Only needed to retrain from scratch. To reproduce the published tables, use §1.
 
 | File | Line | What to change |
 |---|---|---|
-| `fr3_build_fullpool_split.py` | 14 | `SRC = Path("/home/simon/davide_fr3_ws/src/cbf_safety_filter")` → your repo root |
+| `fr3_hocbf/dataset/build_fullpool_split.py` | 14 | `SRC = Path("/home/simon/davide_fr3_ws/src/cbf_safety_filter")` → your repo root |
 | `artifacts/results/fr3_pd_only_all1000_failed_scenarios.txt` | all | absolute scenario paths — rewrite as in §1 step 2 |
 
 Docstring examples in `fr3_compare_rollout_policies.py` and
@@ -271,7 +271,7 @@ root, so it needs no configuration.
 ### 5.1 Generate the training pool
 
 ```bash
-python fr3_generate_candidate_scenarios.py \
+python -m fr3_hocbf.dataset.generate_candidate_scenarios \
   --num-scenarios 1500 --seed 20260520 \
   --output-dir config/generated_scenarios_fullpool_candidates
 ```
@@ -279,7 +279,7 @@ python fr3_generate_candidate_scenarios.py \
 ### 5.2 Generate rollouts
 
 ```bash
-python fr3_generate_scenario_data.py \
+python -m fr3_hocbf.dataset.generate_scenario_data \
   --scenario-dir config/generated_scenarios_fullpool_candidates \
   --output-dir data/rollouts/fullpool_candidates_seed20260520_n1500 \
   --workers 8 --skip-existing
@@ -294,7 +294,7 @@ checkpoint.
 ### 5.3 Build the split
 
 ```bash
-python fr3_build_fullpool_split.py     # fix the hardcoded path first
+python -m fr3_hocbf.dataset.build_fullpool_split     # fix the hardcoded path first
 ```
 
 The 741-scenario selection is reproducible **without re-running any rollouts**.
@@ -325,7 +325,7 @@ train_unique = pd.concat([good_300, hard_good,
 ### 5.4 Feature statistics
 
 ```bash
-python fr3_compute_feature_stats_ddqnorm.py \
+python -m fr3_hocbf.dataset.compute_feature_stats \
   --rollout-labeled <split_dir>/fr3_fullpool_train_weighted.jsonl \
   --out fr3_feature_stats_v10.npz
 ```
@@ -371,7 +371,7 @@ The evaluation scenarios are committed directly, so they are not regenerated.
 ```bash
 unzip artifacts/scenarios/generated_scenarios_eval.zip -d config/
 
-python fr3_run_pd_only_scenarios.py \
+python -m fr3_hocbf.dataset.run_pd_only_scenarios \
   config/generated_scenarios --out-prefix fr3_pd_only_all1000
 ```
 
