@@ -16,7 +16,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    MPLBACKEND=Agg
+    MPLBACKEND=Agg \
+    PYTHONPATH=/repo/src
 
 # git for source control inside the dev container;
 # libquadmath0 is required by cmeel-boost's charconv/locale libraries
