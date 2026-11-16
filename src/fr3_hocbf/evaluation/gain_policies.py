@@ -167,6 +167,47 @@ def kinematic_ddq_bounds(q_arm: np.ndarray, dq_arm: np.ndarray, limits: dict, dt
     return ddq_min_kinematic, ddq_max_kinematic
 
 
+def max_gamma_required_over_pairs(h: np.ndarray, Lf_h: np.ndarray) -> float:
+    """
+    Largest gamma that the first-order condition G1 = Lf_h + gamma*h >= 0 requires:
+    max over pairs with h > 0 of -Lf_h/h; -inf if no pair qualifies.
+
+    h <= 0: already in collision. Raising p1 only makes psi more negative and the
+    QP row harder, so such pairs are skipped (eq. 21).
+    """
+    max_gamma_required = -float("inf")
+    for hi, lfi in zip(h, Lf_h):
+        if hi > EPSILON_DENOMINATOR:
+            gamma_needed = -float(lfi) / float(hi)
+            max_gamma_required = max(max_gamma_required, gamma_needed)
+    return max_gamma_required
+
+
+def max_beta_required_over_pairs(
+    psi: np.ndarray,
+    Lf_psi: np.ndarray,
+    Lg: np.ndarray,
+    ddq_min_kin: np.ndarray,
+    ddq_max_kin: np.ndarray,
+) -> float:
+    """
+    Largest beta that G2 = Lf_psi + S_sup + beta*psi >= 0 requires, with S_sup the
+    largest Lg_psi u over the kinematic acceleration box: max over pairs with psi > 0
+    of -(Lf_psi + S_sup)/psi; -inf if no pair qualifies.
+
+    psi <= 0: raising p2 only tightens the QP row, so such pairs are skipped (eq. 23).
+    """
+    max_beta_required = -float("inf")
+    for psii, lfpsii, lgi in zip(psi, Lf_psi, Lg):
+        sup_lg_u = float(np.sum(np.where(lgi >= 0.0, lgi * ddq_max_kin, lgi * ddq_min_kin)))
+        S_sup = float(lfpsii) + sup_lg_u
+
+        if psii > EPSILON_DENOMINATOR:
+            beta_needed = -S_sup / float(psii)
+            max_beta_required = max(max_beta_required, beta_needed)
+    return max_beta_required
+
+
 def davide_online_p12_current(
     q_arm: np.ndarray,
     dq_arm: np.ndarray,
@@ -195,11 +236,7 @@ def davide_online_p12_current(
     vrel_sq2 = vrel_sq2_all[active]
     Lg = Lg_psi_all[active, :]
 
-    max_gamma_required = -float("inf")
-    for hi, lfi in zip(h, Lf_h):
-        if hi > EPSILON_DENOMINATOR:
-            gamma_needed = -float(lfi) / float(hi)
-            max_gamma_required = max(max_gamma_required, gamma_needed)
+    max_gamma_required = max_gamma_required_over_pairs(h, Lf_h)
 
     gamma = float(initial_gamma)
     if max_gamma_required > -float("inf"):
@@ -211,14 +248,7 @@ def davide_online_p12_current(
     psi = Lf_h + gamma * h
     Lf_psi = vrel_sq2 + gamma * Lf_h
 
-    max_beta_required = -float("inf")
-    for psii, lfpsii, lgi in zip(psi, Lf_psi, Lg):
-        sup_lg_u = float(np.sum(np.where(lgi >= 0.0, lgi * ddq_max_kin, lgi * ddq_min_kin)))
-        S_sup = float(lfpsii) + sup_lg_u
-
-        if psii > EPSILON_DENOMINATOR:
-            beta_needed = -S_sup / float(psii)
-            max_beta_required = max(max_beta_required, beta_needed)
+    max_beta_required = max_beta_required_over_pairs(psi, Lf_psi, Lg, ddq_min_kin, ddq_max_kin)
 
     beta = float(initial_beta)
     if max_beta_required > -float("inf"):
@@ -351,13 +381,7 @@ def minimal_g12_p12_current(
     vrel_sq2 = vrel_sq2_all[active]
     Lg = Lg_psi_all[active, :]
 
-    max_gamma_required = -float("inf")
-    for hi, lfi in zip(h, Lf_h):
-        if hi > EPSILON_DENOMINATOR:
-            gamma_needed = -float(lfi) / float(hi)
-            max_gamma_required = max(max_gamma_required, gamma_needed)
-        # h <= 0: already in collision. Raising p1 only makes psi more
-        # negative and the QP row harder, so such pairs are skipped (eq. 21).
+    max_gamma_required = max_gamma_required_over_pairs(h, Lf_h)
 
     if max_gamma_required > -float("inf"):
         gamma = max(float(p1_floor), max(0.0, max_gamma_required + GAMMA_ADJUST_BUFFER))
@@ -370,16 +394,7 @@ def minimal_g12_p12_current(
     psi = Lf_h + gamma * h
     Lf_psi = vrel_sq2 + gamma * Lf_h
 
-    max_beta_required = -float("inf")
-    for psii, lfpsii, lgi in zip(psi, Lf_psi, Lg):
-        sup_lg_u = float(np.sum(np.where(lgi >= 0.0, lgi * ddq_max_kin, lgi * ddq_min_kin)))
-        S_sup = float(lfpsii) + sup_lg_u
-
-        if psii > EPSILON_DENOMINATOR:
-            beta_needed = -S_sup / float(psii)
-            max_beta_required = max(max_beta_required, beta_needed)
-        # psi <= 0: raising p2 only tightens the QP row, so such pairs are
-        # skipped (eq. 23).
+    max_beta_required = max_beta_required_over_pairs(psi, Lf_psi, Lg, ddq_min_kin, ddq_max_kin)
 
     if max_beta_required > -float("inf"):
         beta = max(float(p2_floor), max(0.0, max_beta_required + BETA_ADJUST_BUFFER))
