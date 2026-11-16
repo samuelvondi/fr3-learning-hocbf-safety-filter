@@ -171,3 +171,5 @@ After moving `src/` into the `fr3_hocbf` package (layout in the README):
 - The table script, the 3 plots and the per-pair report are byte-identical.
 - All 13 CLIs have the same options.
 - The four existing controllers reproduce the committed `out/` and `out_nnfb/` summaries exactly on 20 benchmark scenarios.
+
+The later refactor commits (shared helpers, `policy/` and `differentiable/qp_rows.py` split, training scripts merged into `train_rollout.py --policy`, gain policies moved to `evaluation/gain_policies.py`, combined feature-stats CLI, `build_fullpool_split` CLI) were checked the same way after every commit. A run with non-default `--p1-max/--p2-max` caps and the PD-only runner were checked too, and `build_fullpool_split` gives identical output files on the 966 local rollouts.

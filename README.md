@@ -238,20 +238,21 @@ All code is in the package `src/fr3_hocbf/`. Run every script from `src/` as a m
 | Folder | Contents |
 |---|---|
 | `sim/` | Numpy/Pinocchio simulation: capsule geometry, nominal controller, hard QP, closed-loop rollout |
-| `differentiable/` | Torch versions used in training: kinematics (+ fast analytic Jacobians), pair geometry, bound-slack QP layer |
-| `dataset/` | Scenario generation, rollout datasets, PD-only benchmark, split, feature statistics |
-| `policy/` | Gain networks: shared γ/β (`p12_net.py`) and per-pair β (`pp_beta.py`, see `docs/per_pair_beta_findings.md`) |
-| `train/` | Differentiable-rollout training |
-| `evaluation/` | Controller comparison, Tables I–III, Fig. 4, per-pair β report |
+| `differentiable/` | Torch versions used in training: kinematics (+ fast analytic Jacobians), pair geometry, QP rows, bound-slack QP layer |
+| `dataset/` | Scenario generation, rollout datasets and records, PD-only benchmark, split, feature statistics |
+| `policy/` | Gain networks: shared γ/β (`p12_net.py`), per-pair β (`pp_beta.py`, see `docs/per_pair_beta_findings.md`), 114-D input features (`features.py`) |
+| `train/` | Differentiable-rollout training (`train_rollout.py --policy shared\|per_pair`), config, checkpoints |
+| `evaluation/` | Controller comparison, runtime gain policies and fallback (`gain_policies.py`), Tables I–III, Fig. 4, per-pair β report |
+| `common_io.py` | Scenario-list and CSV/JSON helpers shared by the CLIs |
 
 | Paper element | File |
 |---|---|
 | Double integrator, capsule barrier (Eq. 2–4) | `fr3_hocbf/sim/geometry.py`, `fr3_hocbf/differentiable/geometry.py` |
 | ψ, second-order condition, hard QP (Eq. 5–10) | `fr3_hocbf/sim/qp_solver.py` |
 | 43 collision rows | `fr3_hocbf/sim/qp_data.py` |
-| Gain policy π_θ, 114-D features (Eq. 11–14) | `fr3_hocbf/train/train_rollout.py` |
+| Gain policy π_θ, 114-D features (Eq. 11–14) | `fr3_hocbf/policy/p12_net.py`, `fr3_hocbf/policy/features.py` |
 | Feature normalization (Eq. 13) | `fr3_hocbf/dataset/compute_feature_stats.py` |
-| Differentiable QP with bound slack (Eq. 18–19) | `fr3_hocbf/differentiable/qp_layer.py` |
+| Differentiable QP with bound slack (Eq. 18–19) | `fr3_hocbf/differentiable/qp_layer.py`, rows in `fr3_hocbf/differentiable/qp_rows.py` |
 | Losses (Eq. 15–20) | `fr3_hocbf/train/train_rollout.py` |
 | Split before oversampling (Sec. II-C) | `fr3_hocbf/dataset/build_fullpool_split.py` |
 | Runtime fallback (Eq. 21–24) | `fr3_hocbf/evaluation/gain_policies.py` (used by `compare_rollout_policies.py`) |
