@@ -8,6 +8,8 @@ import pinocchio as pin
 import shutil
 import argparse
 
+from fr3_hocbf import REPO_ROOT
+
 # --- Configuration ---
 N_OBSTACLE_VARIATIONS = 1000
 N_PARAMETERS_VARIATIONS = 1
@@ -20,25 +22,9 @@ MAX_TRIES_PER_OBSTACLE = 200
 
 # --- Pinocchio Model Setup for Collision Checking ---
 URDF_FILENAME = "fr3_robot.urdf"
-# This file lives in:
-#   <workspace>/src/cbf_safety_filter/src/
-# so the package root is one directory above src/.
-from fr3_hocbf import REPO_ROOT
-
+# Paths are resolved from the repository root.
 package_directory = str(REPO_ROOT)
 URDF_PATH = os.path.join(package_directory, "include", "urdf", URDF_FILENAME)
-try:
-    model = pin.buildModelFromUrdf(URDF_PATH)
-    data = model.createData()
-    print("Pinocchio model loaded successfully for collision checking.")
-except Exception as e:
-    print(f"Error: Could not load Pinocchio model from {URDF_PATH}. Cannot perform collision checks.")
-    print(f"Details: {e}")
-    exit()
-
-# Define the robot's fixed initial joint configuration for checking start collisions
-Q_INITIAL= np.zeros(model.nq)
-Q_INITIAL[:7] = np.array([0.0, -np.pi/4, 0.0, -3*np.pi/4, 0.0, np.pi/2, np.pi/4])
 
 # Define the robot's control links (must match HOCBF_v1.py)
 LINKS_DEF = [
@@ -52,22 +38,44 @@ LINKS_DEF = [
     {'name': 'end_effector',      'start_frame_name': 'fr3_hand_tcp',  'end_frame_name': 'fr3_hand_tcp', 'radius': 0.03},
 ]
 
-# Get frame IDs from the Pinocchio model for all unique frames
-unique_frame_names = set()
-for link_def in LINKS_DEF:
-    unique_frame_names.add(link_def['start_frame_name'])
-    unique_frame_names.add(link_def['end_frame_name'])
-
 EE_FRAME_NAME = 'fr3_hand_tcp' # Make sure EE frame is included
-unique_frame_names.add(EE_FRAME_NAME)
 
+# Set by _load_robot(), which main() calls first; used by the collision checks below.
+model = None
+data = None
+Q_INITIAL = None
 frame_ids = {}
-for name in unique_frame_names:
+
+
+def _load_robot():
+    global model, data, Q_INITIAL
     try:
-        frame_ids[name] = model.getFrameId(name)
-    except IndexError:
-        print(f"FATAL: Frame '{name}' not found in URDF. Cannot proceed.")
-        exit()
+        model = pin.buildModelFromUrdf(URDF_PATH)
+        data = model.createData()
+        print("Pinocchio model loaded successfully for collision checking.")
+    except Exception as e:
+        print(f"Error: Could not load Pinocchio model from {URDF_PATH}. Cannot perform collision checks.")
+        print(f"Details: {e}")
+        raise SystemExit(1)
+
+    # Define the robot's fixed initial joint configuration for checking start collisions
+    Q_INITIAL = np.zeros(model.nq)
+    Q_INITIAL[:7] = np.array([0.0, -np.pi/4, 0.0, -3*np.pi/4, 0.0, np.pi/2, np.pi/4])
+
+    # Get frame IDs from the Pinocchio model for all unique frames
+    unique_frame_names = set()
+    for link_def in LINKS_DEF:
+        unique_frame_names.add(link_def['start_frame_name'])
+        unique_frame_names.add(link_def['end_frame_name'])
+    unique_frame_names.add(EE_FRAME_NAME)
+
+    for name in unique_frame_names:
+        try:
+            frame_ids[name] = model.getFrameId(name)
+        except IndexError:
+            print(f"FATAL: Frame '{name}' not found in URDF. Cannot proceed.")
+            raise SystemExit(1)
+
 
 # Define the bounds for randomization
 # Keep these within the robot's reasonable workspace
@@ -170,6 +178,7 @@ def main():
         help="Allow deleting an existing output directory before generation.",
     )
     args = parser.parse_args()
+    _load_robot()
 
     global NUM_SCENARIOS, OUTPUT_DIR
     NUM_SCENARIOS = int(args.num_scenarios)
