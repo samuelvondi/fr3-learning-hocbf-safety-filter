@@ -24,6 +24,10 @@ Supported modes:
   davide_online Davide-style dynamic gamma,beta update
   nn              trained P12ParamNet, pure prediction without fallback
   nn_g12_fallback trained P12ParamNet protected by an independent minimal G12 fallback
+  nn_g12_fallback_hold same, but keeps the fallback gains for --fallback-hold-steps K steps
+                       after the last trigger (experimental, not part of the published results)
+  nn_g12_fallback_recover same as nn_g12_fallback, plus beta_j = max(beta, --recover-beta) on every step
+                       for active rows with psi_j < 0 (experimental)
   nn_pp_beta          trained PerPairBetaNet (shared gamma, per-pair beta_j), no fallback
   nn_pp_beta_fallback PerPairBetaNet with the G12 fallback applied per pair (--pp-model)
 
@@ -71,6 +75,7 @@ from fr3_hocbf.evaluation.gain_policies import (
     load_nn_policy,
     load_pp_pack,
     min_g1_current,
+    pair_scope_mask,
     minimal_g12_p12_current,
     pp_g12_fallback_current,
     predict_p12_nn_current,
@@ -253,6 +258,7 @@ def rollout_one_policy(
     path_length_q = 0.0
     qp_fail_count = 0
     fallback_count = 0
+    hold_left = 0  # nn_g12_fallback_hold: remaining hold steps
     hard_viol_max_overall = 0.0
     min_h_overall = float("inf")
     min_psi_overall = float("inf")
@@ -330,7 +336,7 @@ def rollout_one_policy(
                 fallback_used = True
                 fallback_count += 1
                 fallback_reason = "G1_raised" if p1 > initial_gamma else "G2_sup_raised"
-        elif mode in ("nn", "nn_g12_fallback"):
+        elif mode in ("nn", "nn_g12_fallback", "nn_g12_fallback_hold", "nn_g12_fallback_recover"):
             if nn_pack is None:
                 raise RuntimeError("NN modes require --model")
             nn_model, feat_mean, feat_std = nn_pack
@@ -348,7 +354,7 @@ def rollout_one_policy(
             p1_nn = float(p1)
             p2_nn = float(p2)
 
-            if mode == "nn_g12_fallback" and args.nn_g12_fallback:
+            if mode in ("nn_g12_fallback", "nn_g12_fallback_hold", "nn_g12_fallback_recover") and args.nn_g12_fallback:
                 # Analytic pre-QP check of the NN gains (paper Sec. II-D).
                 min_g1_candidate, min_g2_candidate = g12_check_current(
                     q_arm=q_arm,
@@ -366,13 +372,21 @@ def rollout_one_policy(
                     tol=args.g12_fallback_tol,
                 )
 
-                if not nn_holds:
+                hold = mode == "nn_g12_fallback_hold"
+                if not nn_holds or (hold and hold_left > 0):
                     fallback_used = True
                     fallback_count += 1
-                    if np.isfinite(min_g1_candidate) and min_g1_candidate < -float(args.g12_fallback_tol):
-                        fallback_reason = "G1_negative"
+                    if nn_holds:
+                        # Check passed, but the brake is held after a recent trigger.
+                        fallback_reason = "hold"
+                        hold_left -= 1
                     else:
-                        fallback_reason = "G2_sup_negative"
+                        if hold:
+                            hold_left = int(args.fallback_hold_steps)
+                        if np.isfinite(min_g1_candidate) and min_g1_candidate < -float(args.g12_fallback_tol):
+                            fallback_reason = "G1_negative"
+                        else:
+                            fallback_reason = "G2_sup_negative"
 
                     # Independent fallback: compute minimal current-state p1,p2
                     # from G1/G2, without using scenario gamma/beta as floors.
@@ -458,6 +472,20 @@ def rollout_one_policy(
             if fallback_used:
                 p2_fallback = p2_log
 
+        # nn_g12_fallback_recover: rows that already have psi_j < 0 get a large beta, so that
+        # psi_dot_j >= -beta*psi_j forces psi_j back up (beta ~ 0 would only stop it falling).
+        # p2 stays scalar in the step log; the QP gets the per-row vector.
+        p2_qp = p2
+        recover_rows = 0
+        if mode == "nn_g12_fallback_recover":
+            psi_pre = (np.asarray(all_pair_terms["Lf_h_all"], dtype=float).reshape(NUM_PAIR_ROWS)
+                       + float(p1) * np.asarray(all_pair_terms["h_all"], dtype=float).reshape(NUM_PAIR_ROWS))
+            rec = pair_scope_mask(all_pair_terms["pair_mask"], args.g12_fallback_pair_scope) & (psi_pre < 0.0)
+            recover_rows = int(np.sum(rec))
+            if recover_rows:
+                p2_qp = np.full(NUM_PAIR_ROWS, float(p2))
+                p2_qp[rec] = max(float(p2), float(args.recover_beta))
+
         (
             u_nom,
             A_full,
@@ -474,7 +502,7 @@ def rollout_one_policy(
             all_pair_terms=all_pair_terms,
             joint_limits=joint_limits,
             p1=p1,
-            p2=p2,
+            p2=p2_qp,
             dt=dt,
             eps_abs=args.eps_abs,
             eps_rel=args.eps_rel,
@@ -746,7 +774,7 @@ def rollout_one_policy(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("scenarios", nargs="+", help="Scenario YAML(s), directories, globs, or txt files")
-    parser.add_argument("--modes", type=str, default="original,davide_online,fixed", help="Comma-separated modes. Valid: original,fixed,davide_online,nn,nn_g12_fallback,nn_pp_beta,nn_pp_beta_fallback")
+    parser.add_argument("--modes", type=str, default="original,davide_online,fixed", help="Comma-separated modes. Valid: original,fixed,davide_online,nn,nn_g12_fallback,nn_g12_fallback_hold,nn_g12_fallback_recover,nn_pp_beta,nn_pp_beta_fallback")
 
     parser.add_argument("--p1-fixed", type=float, default=2.0)
     parser.add_argument("--p2-fixed", type=float, default=3.0)
@@ -782,6 +810,19 @@ def main():
         help="Tolerance for NN G12 fallback. Fallback if min G1 or min G2 is below -tol.",
     )
     parser.add_argument("--g12-fallback-p1-floor", type=float, default=1e-3)
+    parser.add_argument(
+        "--recover-beta",
+        type=float,
+        default=25.0,
+        help="Mode nn_g12_fallback_recover: beta used on active rows with psi_j < 0.",
+    )
+    parser.add_argument(
+        "--fallback-hold-steps",
+        type=int,
+        default=5,
+        help="Mode nn_g12_fallback_hold: after a trigger, keep the fallback gains (recomputed each step) "
+        "for this many further steps even if the NN gains pass the check.",
+    )
     parser.add_argument("--g12-fallback-p2-floor", type=float, default=1e-3)
 
     parser.add_argument(
@@ -836,15 +877,15 @@ def main():
         raise RuntimeError("No scenario YAML files found.")
 
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
-    valid_modes = {"original", "fixed", "davide_online", "nn", "nn_g12_fallback", "nn_pp_beta", "nn_pp_beta_fallback"}
+    valid_modes = {"original", "fixed", "davide_online", "nn", "nn_g12_fallback", "nn_g12_fallback_hold", "nn_g12_fallback_recover", "nn_pp_beta", "nn_pp_beta_fallback"}
     for m in modes:
         if m not in valid_modes:
             raise ValueError(f"Unknown mode {m}. Valid: {sorted(valid_modes)}")
 
     nn_pack = None
-    if any(m in modes for m in ("nn", "nn_g12_fallback")):
+    if any(m in modes for m in ("nn", "nn_g12_fallback", "nn_g12_fallback_hold", "nn_g12_fallback_recover")):
         if args.model is None:
-            raise ValueError("Modes nn and nn_g12_fallback require --model")
+            raise ValueError("NN modes require --model")
         nn_pack = load_nn_policy(
             model_path=args.model,
             stats_path=args.stats,

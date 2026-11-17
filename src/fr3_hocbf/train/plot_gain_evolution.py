@@ -1,8 +1,8 @@
-"""Plot how the mean NN gains (gamma = p1, beta = p2) evolve over the training epochs.
+"""Plot how the mean NN gains (gamma = p1, beta = p2) and the loss evolve over the training epochs.
 
 Reads the epoch logs written by train_rollout.py (one JSON object per epoch with
 "train" and optional "val" entries holding p1_mean / p2_mean) and draws one column
-per run: gamma on top, beta below, training mean as a line, validation mean as dots.
+per run: gamma, beta and loss, training mean as a line, validation mean as dots.
 Selected checkpoints can be marked with vertical lines.
 
 Example (from src/):
@@ -37,10 +37,10 @@ def read_log(path: Path):
         for line in f:
             row = json.loads(line)
             ep = row["train"]["epoch"]
-            train.append((ep, row["train"]["p1_mean"], row["train"]["p2_mean"]))
+            train.append((ep, row["train"]["p1_mean"], row["train"]["p2_mean"], row["train"]["loss"]))
             v = row.get("val")
             if v and "p1_mean" in v:
-                val.append((ep, v["p1_mean"], v["p2_mean"]))
+                val.append((ep, v["p1_mean"], v["p2_mean"], v.get("loss", float("nan"))))
     return train, val
 
 
@@ -67,15 +67,15 @@ def main():
 
     plt.rcParams.update({"font.size": 9, "axes.edgecolor": INK_2, "axes.labelcolor": INK,
                          "xtick.color": INK_2, "ytick.color": INK_2, "text.color": INK})
-    fig, axes = plt.subplots(2, len(runs), figsize=(2.6 * len(runs) + 0.6, 5.2),
+    fig, axes = plt.subplots(3, len(runs), figsize=(2.6 * len(runs) + 0.6, 7.6),
                              sharex=True, sharey="row", squeeze=False)
     for col, (name, path) in enumerate(runs):
         train, val = read_log(Path(path))
-        for row, (idx, sym) in enumerate([(1, "γ"), (2, "β")]):
+        for row, (idx, sym) in enumerate([(1, "mean γ"), (2, "mean β"), (3, "loss")]):
             ax = axes[row][col]
-            ax.plot([t[0] for t in train], [max(t[idx], FLOOR) for t in train],
+            ax.plot([t[0] for t in train], [(max(t[idx], FLOOR) if idx == 2 else t[idx]) for t in train],
                     color=TRAIN_COLOR, lw=2, label="train mean")
-            ax.plot([v[0] for v in val], [max(v[idx], FLOOR) for v in val], "o",
+            ax.plot([v[0] for v in val], [(max(v[idx], FLOOR) if idx == 2 else v[idx]) for v in val], "o",
                     ms=4, color=VAL_COLOR, mec="white", mew=0.8, label="val mean")
             for ep, label in marks.get(name, []):
                 ax.axvline(ep, color=INK_2, lw=1, ls=MARK_STYLES.get(label, "-."), zorder=0)
@@ -88,14 +88,14 @@ def main():
             for s in ("top", "right"):
                 ax.spines[s].set_visible(False)
             if col == 0:
-                ax.set_ylabel(f"mean {sym}" + (" (clipped at 1e-3)" if row == 1 else ""))
+                ax.set_ylabel(sym + (" (clipped at 1e-3)" if row == 1 else ""))
             if row == 0:
                 ax.set_title(name, fontsize=10)
-            else:
+            if row == 2:
                 ax.set_xlabel("epoch")
     h, lab = axes[0][0].get_legend_handles_labels()
     fig.legend(h, lab, loc="upper right", ncol=2, frameon=False)
-    fig.suptitle("Mean NN gains over training epochs", x=0.01, ha="left", fontsize=11)
+    fig.suptitle("Mean NN gains and loss over training epochs", x=0.01, ha="left", fontsize=11)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.out, dpi=160)

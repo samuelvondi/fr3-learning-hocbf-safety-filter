@@ -1,8 +1,22 @@
 # Work diary
 
 High-level log of what was done. Results and findings are in the topic documents:
-`per_pair_beta_findings.md` (experiments and analyses), `dev_notes.md` (environment, tooling, verification),
+`per_pair_beta_findings.md` (experiments and analyses), `fallback_findings.md` (runtime fallback), `dev_notes.md` (environment, tooling, verification),
 `paper_alignment.md` (the 2026-10 alignment of the code with the paper).
+
+## 2026-11-17 — Training behaviour, outcome table, fallback analysis
+
+**Training behaviour**
+- Added `train/plot_gain_evolution.py`: mean γ, β and loss per epoch (training and validation) for any set of training logs, with the selected checkpoints marked. Plotted the published run and the four per-pair seeds (`data/plots/gain_evolution.png`).
+- Finding: the training does not converge. The loss is lowest around epoch 1 and never trends down. γ and β swing by one to two orders of magnitude up to the last epoch, β collapses to about 0 in phases, and seeds 0 and 3 diverge late. Checkpoint selection therefore effectively picks one of many similar, partly random networks.
+
+**Result tables**
+- Added table "0. Outcome" to `evaluation/make_final_metric_tables.py`: disjoint categories (safe success / violation / QP fail / timeout) that sum to 100 %, plus `outcome_*` columns in the values CSV. The existing tables are unchanged. Before, overlapping flags summed to 101.2 % for NN + Fallback.
+
+**Fallback analysis**
+- Analysed what happens after the fallback fires, and added the experimental mode `nn_g12_fallback_hold` (`--fallback-hold-steps K`). Checked it against the existing fallback with K = 0 and swept K = 3, 5, 10 on the 460 benchmark.
+- Added the experimental mode `nn_g12_fallback_recover` (`--recover-beta B`): large β on rows with ψ_j < 0. Checked it with B = 0 and swept B = 10–200. At B = 200: 86.7 % safe success, 0 % violations (reference 80.4 / 11.5), at the cost of more QP-fail stops (10.7 vs. 6.5 %).
+- Findings in `fallback_findings.md`.
 
 ## 2026-11-15/16 — Per-pair β experiment, code reorganisation
 
