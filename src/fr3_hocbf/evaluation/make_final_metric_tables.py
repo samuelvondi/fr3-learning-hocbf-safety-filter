@@ -324,6 +324,9 @@ def load_combined_data(runs: list[dict[str, Any]], method_order: list[str] | Non
 # Main table generation
 # -----------------------------------------------------------------------------
 
+OUTCOMES = ("safe_success", "violation", "qp_fail", "timeout")
+
+
 def build_tables(
     summary_df: pd.DataFrame,
     steps_df: pd.DataFrame,
@@ -374,8 +377,19 @@ def build_tables(
     summary_df["g2_violation_run"] = safe_numeric(summary_df, "min_g2_summary") < -float(safety_tol)
     summary_df["safe_success_bool"] = summary_df["success_bool"] & (~summary_df["h_violation_run"])
 
+    # Disjoint outcome per run (sums to 100 %). Priority: violation > QP failure > timeout.
+    # A violation counts even if the run reached the goal or later stopped on a QP failure.
+    viol = summary_df["h_violation_run"]
+    qpf = summary_df["qp_failed_run"] & ~viol
+    summary_df["outcome"] = np.select(
+        [viol, qpf, summary_df["success_bool"]],
+        ["violation", "qp_fail", "safe_success"],
+        default="timeout",
+    )
+
     runtime_steps = steps_df[steps_df["qp_solved_bool"]].copy()
 
+    outcome_rows: list[list[str]] = []
     task_rows: list[list[str]] = []
     safety_h_rows: list[list[str]] = []
     safety_g_rows: list[list[str]] = []
@@ -396,6 +410,10 @@ def build_tables(
 
         success_count = int(sdf["success_bool"].sum())
         safe_success_count = int(sdf["safe_success_bool"].sum())
+
+        outcome_counts = {k: int((sdf["outcome"] == k).sum()) for k in OUTCOMES}
+        assert sum(outcome_counts.values()) == n
+        outcome_rows.append([short] + [count_pct(outcome_counts[k], n) for k in OUTCOMES])
 
         completion_col = "task_completion_time_s" if "task_completion_time_s" in sdf.columns else None
         if completion_col is None and "success_time_s" in sdf.columns:
@@ -568,9 +586,12 @@ def build_tables(
             ).max()),
             "mean_p1_all_steps": float(safe_numeric(stp_all, "p1").mean()),
             "mean_p2_all_steps": float(safe_numeric(stp_all, "p2").mean()),
+            **{f"outcome_{k}_count": outcome_counts[k] for k in OUTCOMES},
+            **{f"outcome_{k}_rate_pct": 100.0 * outcome_counts[k] / n for k in OUTCOMES},
         })
 
     rows = {
+        "outcome": outcome_rows,
         "task": task_rows,
         "safety_h": safety_h_rows,
         "safety_g": safety_g_rows,
@@ -594,9 +615,9 @@ def render_tables(
 
     fig = plt.figure(figsize=figsize)
     gs = fig.add_gridspec(
-        nrows=7,
+        nrows=8,
         ncols=1,
-        height_ratios=[0.72, 1.18, 0.95, 1.25, 1.12, 1.12, 1.18],
+        height_ratios=[0.72, 1.18, 1.18, 0.95, 1.25, 1.12, 1.12, 1.18],
         hspace=0.26,
     )
 
@@ -622,6 +643,21 @@ def render_tables(
 
     draw_table(
         fig.add_subplot(gs[1, 0]),
+        "0. Outcome (disjoint, rows sum to 100 %)",
+        [
+            "Method",
+            "Safe success\n(goal, no violation, no QP failure)",
+            f"Violation\nmin h < -{safety_tol:g}, any end",
+            "QP failure\n(no violation before stop)",
+            "Timeout\n(no goal, no violation, no QP failure)",
+        ],
+        rows["outcome"],
+        font_size=10.2,
+        col_widths=[0.16, 0.21, 0.21, 0.21, 0.21],
+    )
+
+    draw_table(
+        fig.add_subplot(gs[2, 0]),
         "1. Task",
         ["Method", "Success rate", "Safe success rate", "Completion time [s]", "Progress score", "Final goal distance [m]"],
         rows["task"],
@@ -630,7 +666,7 @@ def render_tables(
     )
 
     draw_table(
-        fig.add_subplot(gs[2, 0]),
+        fig.add_subplot(gs[3, 0]),
         "2a. Safety — h",
         ["Method", f"h violation count\nmin h < -{safety_tol:g}", "min h\nmedian [Q1, Q3]", "min h\nworst"],
         rows["safety_h"],
@@ -639,7 +675,7 @@ def render_tables(
     )
 
     draw_table(
-        fig.add_subplot(gs[3, 0]),
+        fig.add_subplot(gs[4, 0]),
         "2b. Safety — G1 and G2",
         [
             "Method",
@@ -656,7 +692,7 @@ def render_tables(
     )
 
     draw_table(
-        fig.add_subplot(gs[4, 0]),
+        fig.add_subplot(gs[5, 0]),
         "3. Efficiency / smoothness",
         ["Method", "Path inefficiency ratio\n(successes)", "Mean squared jerk", "Intervention magnitude"],
         rows["eff"],
@@ -665,7 +701,7 @@ def render_tables(
     )
 
     draw_table(
-        fig.add_subplot(gs[5, 0]),
+        fig.add_subplot(gs[6, 0]),
         "4. Robustness",
         ["Method", "Runs with any\nQP infeasibility", "Total QP-failed steps", "Fallback-used runs", "Fallback activation rate"],
         rows["robust"],
@@ -674,7 +710,7 @@ def render_tables(
     )
 
     draw_table(
-        fig.add_subplot(gs[6, 0]),
+        fig.add_subplot(gs[7, 0]),
         "5. Runtime / p12",
         ["Method", "QP solve time [ms]\nmean / p95 / max", "Offline total step time [ms]\nmean / p95 / max", "Mean p1", "Mean p2"],
         rows["runtime"],
@@ -713,7 +749,7 @@ def main() -> None:
     parser.add_argument("--out-prefix", required=True)
     parser.add_argument("--safety-tol", type=float, default=1e-4)
     parser.add_argument("--fig-width", type=float, default=40.0)
-    parser.add_argument("--fig-height", type=float, default=25.0)
+    parser.add_argument("--fig-height", type=float, default=28.0)
     args = parser.parse_args()
 
     runs = parse_runs(args.run)
