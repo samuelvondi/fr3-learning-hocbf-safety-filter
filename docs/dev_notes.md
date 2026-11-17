@@ -24,11 +24,15 @@ After a rebuild: `pip install -r requirements-dev.txt` for pyflakes. The image a
 | `data/smoke/` | 14-rollout smoke subset, smoke stats/trainings, 20-scenario check outputs |
 | `data/pp_beta_v10*/` | per-pair β runs (seed 0–3), evaluations, `selection.json`, `seed_results.csv`, driver scripts |
 | `data/dev_tools/` | verification tools and baselines (§4) |
+| `data/od_hocbf/` | optimal-decay sweep: `run_all.sh` (260 jobs, ~40 min on 20 cores), `status.sh` (progress), `analyze.py` → `report.md`, `runs/`, `checks/` |
 | `out/`, `out_nnfb/` | reference results of the 2026-10 alignment run (see `paper_alignment.md`) |
 
 ## 3. Environment quirks
 
 - **Line endings:** the working copy has CRLF in files from the Windows checkout, git stores LF (`.gitattributes`: `* text=auto eol=lf`). Compare files with `tr -d '\r'` or through git, not with plain `cmp`.
+- **No `watch`:** use `while true; do clear; <cmd>; sleep 30; done`.
+- **Negative CLI values:** argparse reads `-inf` as a flag; write `--od-omega-min=-inf`.
+- **Solver time:** cvxpy recompiling the problem every step dominates the hard-QP solve (~5 ms vs. ~1.4 ms for the parameterized `OptimalDecayQP`).
 - **No `pgrep`/`ps`** in the container. To find processes, scan `/proc/*/cmdline`; use a `[x]yz` pattern so the `grep` does not match itself.
 - **torch is the CPU-only build.** A GPU would not help anyway (`per_pair_beta_findings.md` §4).
 - **Run scripts from `src/` as modules** (`python -m fr3_hocbf.<stage>.<script>`); running a file inside the package directly breaks its imports.

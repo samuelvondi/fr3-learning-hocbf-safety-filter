@@ -1,8 +1,16 @@
 # Work diary
 
 High-level log of what was done. Results and findings are in the topic documents:
-`per_pair_beta_findings.md` (experiments and analyses), `fallback_findings.md` (runtime fallback), `dev_notes.md` (environment, tooling, verification),
+`per_pair_beta_findings.md` (experiments and analyses), `fallback_findings.md` (runtime fallback), `od_hocbf_findings.md` (optimal-decay controller), `dev_notes.md` (environment, tooling, verification),
 `paper_alignment.md` (the 2026-10 alignment of the code with the paper).
+
+## 2026-11-17 — Optimal-decay HOCBF controller
+
+- Added the standalone controller mode `od_hocbf` (Zeng et al., ACC 2021, eq. 21, one decay variable ω_j per pair, fixed γ₀/β₀; flags `--od-*`). It is built once as a parameterized QP. The existing modes are unchanged.
+- Checked it: frozen ω reproduces `fixed` 10/15 bit-identically; p_ω = 10⁸ gives the same outcomes as Fixed on 20 scenarios.
+- Swept p_ω ∈ {10⁻², 1, 10², 10⁴, 10⁶, 10⁸} × ω ≥ 0 / unbounded on the 460 benchmark, plus a Fixed rerun.
+- Analysed why the QP stops remain: they come from the joint bounds being infeasible on their own, outside the scope of Zeng's Theorem 1. Noted joint-limit CBFs with a braking-distance velocity bound as a possible next step.
+- Findings in `od_hocbf_findings.md`.
 
 ## 2026-11-17 — Training behaviour, outcome table, fallback analysis
 

@@ -30,6 +30,8 @@ Supported modes:
                        for active rows with psi_j < 0 (experimental)
   nn_pp_beta          trained PerPairBetaNet (shared gamma, per-pair beta_j), no fallback
   nn_pp_beta_fallback PerPairBetaNet with the G12 fallback applied per pair (--pp-model)
+  od_hocbf        optimal-decay HOCBF (Zeng et al., ACC 2021, eq. 21): fixed gamma0, beta0 * omega_j with one
+                  QP variable omega_j per pair, cost p_omega*(omega_j - 1)^2 (--od-* flags). No NN, no fallback.
 
 Recommended first smoke test:
   python compare_rollout_policies.py \
@@ -198,6 +200,128 @@ def build_and_solve_hard_qp_for_p12(
 
 
 # ---------------------------------------------------------------------
+# optimal-decay HOCBF QP (Zeng et al., ACC 2021, eq. 21, one omega per pair)
+# ---------------------------------------------------------------------
+class OptimalDecayQP:
+    """
+    Optimal-decay CBF-QP (Zeng, Zhang, Li, Sreenath, ACC 2021, eq. 21) applied to the
+    top-order HOCBF row of every pair j, with alpha(psi) = beta0 * psi and omega_0 = 1:
+
+        min_{u, omega}  0.5 ||u - u_nom||^2 + p_omega * sum_j (omega_j - 1)^2      (21a)
+        s.t.            Lg psi_j u + Lf psi_j >= -omega_j * beta0 * psi_j            (21b)
+                        A_bounds u >= b_bounds                                       (21c)
+                        omega_j >= omega_min   (only if omega_min is finite)
+
+    psi_j = Lf h_j + gamma0 h_j with fixed gamma0. The problem has a fixed size
+    (NUM_PAIR_ROWS omega variables); a row gets omega coefficient c_j = beta0 * psi_j only if it
+    is active and |psi_j| >= psi_eps. Otherwise c_j = 0: the cost pins omega_j = 1 and the row is
+    a hard row (inactive rows are 0 >= 0). Built once with cvxpy parameters, so each step only
+    updates values and OSQP warm-starts.
+    """
+
+    def __init__(self, p_omega: float, omega_min: float, eps_abs: float, eps_rel: float, max_iter: int):
+        self.p_omega = float(p_omega)
+        self.omega_min = float(omega_min)
+        self.eps_abs, self.eps_rel, self.max_iter = eps_abs, eps_rel, max_iter
+
+        self.u = cp.Variable(NUM_ARM_JOINTS)
+        self.omega = cp.Variable(NUM_PAIR_ROWS)
+        self.A = cp.Parameter((NUM_TOTAL_ROWS, NUM_ARM_JOINTS))
+        self.b = cp.Parameter(NUM_TOTAL_ROWS)
+        self.c = cp.Parameter(NUM_PAIR_ROWS)
+        self.u_nom = cp.Parameter(NUM_ARM_JOINTS)
+
+        lhs_pairs = self.A[:NUM_PAIR_ROWS, :] @ self.u + cp.multiply(self.c, self.omega)
+        constraints = [
+            lhs_pairs >= self.b[:NUM_PAIR_ROWS],
+            self.A[NUM_PAIR_ROWS:, :] @ self.u >= self.b[NUM_PAIR_ROWS:],
+        ]
+        if np.isfinite(self.omega_min):
+            constraints.append(self.omega >= self.omega_min)
+        cost = 0.5 * cp.sum_squares(self.u - self.u_nom) + self.p_omega * cp.sum_squares(self.omega - 1.0)
+        self.problem = cp.Problem(cp.Minimize(cost), constraints)
+
+    def solve(self, u_nom, A_full, b_full, c):
+        self.A.value = np.asarray(A_full, dtype=float)
+        self.b.value = np.asarray(b_full, dtype=float)
+        self.c.value = np.asarray(c, dtype=float)
+        self.u_nom.value = np.asarray(u_nom, dtype=float)
+
+        t0 = time.time()
+        try:
+            self.problem.solve(
+                solver=cp.OSQP,
+                warm_start=True,
+                verbose=False,
+                eps_abs=self.eps_abs,
+                eps_rel=self.eps_rel,
+                max_iter=self.max_iter,
+            )
+            status = str(self.problem.status)
+        except cp.error.SolverError as exc:
+            status = f"osqp_solver_error:{repr(exc)}"
+        solve_time_s = time.time() - t0
+
+        if self.problem.status in OPTIMAL_STATUSES and self.u.value is not None:
+            return (np.asarray(self.u.value, dtype=float).copy(),
+                    np.asarray(self.omega.value, dtype=float).copy(), True, status, solve_time_s)
+        return (np.full(NUM_ARM_JOINTS, np.nan), np.full(NUM_PAIR_ROWS, np.nan), False, status, solve_time_s)
+
+
+_OD_SOLVERS: dict = {}
+
+
+def _od_solver(args) -> OptimalDecayQP:
+    """One compiled optimal-decay QP per (p_omega, omega_min, tolerances), reused across steps."""
+    key = (float(args.od_p_omega), float(args.od_omega_min), args.eps_abs, args.eps_rel, args.max_iter)
+    if key not in _OD_SOLVERS:
+        _OD_SOLVERS[key] = OptimalDecayQP(*key)
+    return _OD_SOLVERS[key]
+
+
+def _od_log_row(scenario_path: str, step: int, od_step: dict, args) -> dict:
+    active, has_omega, psi, omega = od_step["active"], od_step["has_omega"], od_step["psi"], od_step["omega"]
+    w = omega[has_omega]
+    finite = bool(np.all(np.isfinite(w)))
+    dev = w - 1.0
+    return {
+        "scenario": Path(scenario_path).stem,
+        "step": step,
+        "p_omega": float(args.od_p_omega),
+        "omega_min_bound": float(args.od_omega_min),
+        "qp_status": od_step["qp_status"],
+        "stop_cause": od_step["stop_cause"],
+        "n_active": int(np.sum(active)),
+        "n_omega_vars": int(np.sum(has_omega)),
+        "n_psi_zero": int(np.sum(active & ~has_omega)),
+        "n_psi_neg": int(np.sum(active & (psi < 0.0))),
+        "n_omega_changed": int(np.sum(np.abs(dev) > 1e-6)) if finite else -1,
+        "n_omega_gt1": int(np.sum(dev > 1e-6)) if finite else -1,
+        "n_omega_lt1": int(np.sum(dev < -1e-6)) if finite else -1,
+        "omega_min": float(np.min(w)) if w.size and finite else float("nan"),
+        "omega_max": float(np.max(w)) if w.size and finite else float("nan"),
+        "omega_changed": _pair_values_str(omega, has_omega & (np.abs(omega - 1.0) > 1e-6)) if finite else "",
+        "psi_changed": _pair_values_str(psi, has_omega & (np.abs(omega - 1.0) > 1e-6)) if finite else "",
+    }
+
+
+def od_stop_cause(*, u_nom, A_full, b_full, active, psi, psi_eps, omega_min, args) -> str:
+    """Classify an infeasible optimal-decay QP: box_only, psi_zero, psi_neg_bound, other."""
+    A_box = A_full.copy()
+    b_box = b_full.copy()
+    A_box[:NUM_PAIR_ROWS, :] = 0.0
+    b_box[:NUM_PAIR_ROWS] = 0.0
+    _, box_ok, _, _ = solve_hard_qp_osqp(u_nom, A_box, b_box, args.eps_abs, args.eps_rel, args.max_iter)
+    if not box_ok:
+        return "box_only"
+    if np.any(active & (np.abs(psi) < psi_eps)):
+        return "psi_zero"
+    if np.isfinite(omega_min) and np.any(active & (psi <= -psi_eps)):
+        return "psi_neg_bound"
+    return "other"
+
+
+# ---------------------------------------------------------------------
 # per-pair step log helpers
 # ---------------------------------------------------------------------
 
@@ -223,6 +347,7 @@ def rollout_one_policy(
     nn_pack=None,
     pp_pack=None,
     pp_log: list[dict] | None = None,
+    od_log: list[dict] | None = None,
 ) -> tuple[dict, list[dict]]:
     model = context["model"]
     data = model.createData()
@@ -321,6 +446,10 @@ def rollout_one_policy(
         elif mode == "fixed":
             p1 = float(args.p1_fixed)
             p2 = float(args.p2_fixed)
+        elif mode == "od_hocbf":
+            # gamma0 defines psi_j; beta0 is the nominal decay that omega_j scales (logged as p2).
+            p1 = float(args.od_gamma)
+            p2 = float(args.od_beta)
         elif mode == "davide_online":
             p1, p2, max_gamma_required, max_beta_required = davide_online_p12_current(
                 q_arm=q_arm,
@@ -486,28 +615,80 @@ def rollout_one_policy(
                 p2_qp = np.full(NUM_PAIR_ROWS, float(p2))
                 p2_qp[rec] = max(float(p2), float(args.recover_beta))
 
-        (
-            u_nom,
-            A_full,
-            b_full,
-            mask_full,
-            ddq_safe,
-            qp_solved,
-            qp_status,
-            solve_time_s,
-        ) = build_and_solve_hard_qp_for_p12(
-            q_arm=q_arm,
-            dq_arm=dq_arm,
-            ddq_nominal=ddq_nominal,
-            all_pair_terms=all_pair_terms,
-            joint_limits=joint_limits,
-            p1=p1,
-            p2=p2_qp,
-            dt=dt,
-            eps_abs=args.eps_abs,
-            eps_rel=args.eps_rel,
-            max_iter=args.max_iter,
-        )
+        od_step = None
+        if mode == "od_hocbf" and not args.od_freeze_omega:
+            # Rows with p2 = 0: b_coll = -Lf psi. The omega column is c_j = beta0 * psi_j.
+            u_nom, A_full, b_full, mask_full = build_full_qp_numpy(
+                q_arm=q_arm,
+                dq_arm=dq_arm,
+                u_nom=ddq_nominal,
+                h_all=all_pair_terms["h_all"],
+                Lf_h_all=all_pair_terms["Lf_h_all"],
+                vrel_sq2_all=all_pair_terms["vrel_sq2_all"],
+                Lg_psi_all=all_pair_terms["Lg_psi_all"],
+                pair_mask=all_pair_terms["pair_mask"],
+                p1=p1,
+                p2=0.0,
+                dt=dt,
+                ddq_min_arm=joint_limits["ddq_min_arm"],
+                ddq_max_arm=joint_limits["ddq_max_arm"],
+                dq_min_arm=joint_limits["dq_min_arm"],
+                dq_max_arm=joint_limits["dq_max_arm"],
+                q_min_arm=joint_limits["q_min_arm"],
+                q_max_arm=joint_limits["q_max_arm"],
+            )
+            psi = (np.asarray(all_pair_terms["Lf_h_all"], dtype=float).reshape(NUM_PAIR_ROWS)
+                   + p1 * np.asarray(all_pair_terms["h_all"], dtype=float).reshape(NUM_PAIR_ROWS))
+            od_active = mask_full[:NUM_PAIR_ROWS] > 0.5
+            psi_eps = float(args.od_psi_eps)
+            has_omega = od_active & (np.abs(psi) >= psi_eps)
+            c = np.where(has_omega, float(args.od_beta) * psi, 0.0)
+            # Rows without omega (|psi| < eps) are hard with omega_j = 1.
+            b_full[:NUM_PAIR_ROWS] = np.where(
+                od_active & ~has_omega, b_full[:NUM_PAIR_ROWS] - float(args.od_beta) * psi, b_full[:NUM_PAIR_ROWS]
+            )
+            ddq_safe, omega, qp_solved, qp_status, solve_time_s = _od_solver(args).solve(u_nom, A_full, b_full, c)
+            if qp_solved:
+                omega = np.where(has_omega, omega, 1.0)
+                # Effective row b so hard_violation_numpy, min_g2 and qp_margin keep their meaning.
+                b_full[:NUM_PAIR_ROWS] = b_full[:NUM_PAIR_ROWS] - c * omega
+            od_step = {
+                "active": od_active,
+                "has_omega": has_omega,
+                "psi": psi,
+                "omega": omega,
+                "stop_cause": "" if qp_solved else od_stop_cause(
+                    u_nom=u_nom, A_full=A_full, b_full=b_full, active=od_active, psi=psi,
+                    psi_eps=psi_eps, omega_min=float(args.od_omega_min), args=args,
+                ),
+                "qp_status": qp_status,
+            }
+        else:
+            (
+                u_nom,
+                A_full,
+                b_full,
+                mask_full,
+                ddq_safe,
+                qp_solved,
+                qp_status,
+                solve_time_s,
+            ) = build_and_solve_hard_qp_for_p12(
+                q_arm=q_arm,
+                dq_arm=dq_arm,
+                ddq_nominal=ddq_nominal,
+                all_pair_terms=all_pair_terms,
+                joint_limits=joint_limits,
+                p1=p1,
+                p2=p2_qp,
+                dt=dt,
+                eps_abs=args.eps_abs,
+                eps_rel=args.eps_rel,
+                max_iter=args.max_iter,
+            )
+
+        if od_step is not None and od_log is not None:
+            od_log.append(_od_log_row(scenario_path, k, od_step, args))
 
         if qp_solved:
             hard_viol, min_qp_margin = hard_violation_numpy(ddq_safe, A_full, b_full)
@@ -774,7 +955,7 @@ def rollout_one_policy(
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("scenarios", nargs="+", help="Scenario YAML(s), directories, globs, or txt files")
-    parser.add_argument("--modes", type=str, default="original,davide_online,fixed", help="Comma-separated modes. Valid: original,fixed,davide_online,nn,nn_g12_fallback,nn_g12_fallback_hold,nn_g12_fallback_recover,nn_pp_beta,nn_pp_beta_fallback")
+    parser.add_argument("--modes", type=str, default="original,davide_online,fixed", help="Comma-separated modes. Valid: original,fixed,davide_online,nn,nn_g12_fallback,nn_g12_fallback_hold,nn_g12_fallback_recover,nn_pp_beta,nn_pp_beta_fallback,od_hocbf")
 
     parser.add_argument("--p1-fixed", type=float, default=2.0)
     parser.add_argument("--p2-fixed", type=float, default=3.0)
@@ -848,6 +1029,27 @@ def main():
         "cap_old: min(beta_NN_j, existing scalar fallback beta).",
     )
 
+    parser.add_argument("--od-gamma", type=float, default=10.0, help="od_hocbf: fixed gamma0 (defines psi_j).")
+    parser.add_argument("--od-beta", type=float, default=15.0, help="od_hocbf: nominal beta0, scaled per pair by omega_j.")
+    parser.add_argument(
+        "--od-p-omega",
+        type=float,
+        default=1.0,
+        help="od_hocbf: weight p_omega in 0.5||u-u_nom||^2 + p_omega*sum_j (omega_j-1)^2 (Zeng et al. 2021, eq. 21a).",
+    )
+    parser.add_argument(
+        "--od-omega-min",
+        type=float,
+        default=0.0,
+        help="od_hocbf: lower bound on omega_j; -inf leaves omega unbounded (Zeng et al. 2021, Remark 6).",
+    )
+    parser.add_argument("--od-psi-eps", type=float, default=1e-9, help="od_hocbf: rows with |psi_j| below this stay hard (omega_j = 1).")
+    parser.add_argument(
+        "--od-freeze-omega",
+        action="store_true",
+        help="od_hocbf debug: fix omega_j = 1 and solve with the existing hard-QP path (must equal fixed with --p1-fixed/--p2-fixed = --od-gamma/--od-beta).",
+    )
+
     parser.add_argument("--dt", type=float, default=1.0 / 50.0)
     parser.add_argument("--max-steps", type=int, default=None, help="Debug cap. Default uses scenario max_sim_duration_s")
     parser.add_argument("--limit-scenarios", type=int, default=None)
@@ -877,7 +1079,7 @@ def main():
         raise RuntimeError("No scenario YAML files found.")
 
     modes = [m.strip() for m in args.modes.split(",") if m.strip()]
-    valid_modes = {"original", "fixed", "davide_online", "nn", "nn_g12_fallback", "nn_g12_fallback_hold", "nn_g12_fallback_recover", "nn_pp_beta", "nn_pp_beta_fallback"}
+    valid_modes = {"original", "fixed", "davide_online", "nn", "nn_g12_fallback", "nn_g12_fallback_hold", "nn_g12_fallback_recover", "nn_pp_beta", "nn_pp_beta_fallback", "od_hocbf"}
     for m in modes:
         if m not in valid_modes:
             raise ValueError(f"Unknown mode {m}. Valid: {sorted(valid_modes)}")
@@ -916,6 +1118,7 @@ def main():
     all_summaries: list[dict] = []
     all_rows: list[dict] = []
     all_pp_rows: list[dict] = []
+    all_od_rows: list[dict] = []
 
     total_t0 = time.time()
     for scen_i, scenario_path in enumerate(scenario_paths):
@@ -929,6 +1132,7 @@ def main():
                 nn_pack=nn_pack,
                 pp_pack=pp_pack,
                 pp_log=all_pp_rows,
+                od_log=all_od_rows,
             )
             all_summaries.append(summary)
             all_rows.extend(rows)
@@ -953,6 +1157,10 @@ def main():
         pp_rows_csv = f"{args.out_prefix}_pp_steps.csv"
         write_csv(pp_rows_csv, all_pp_rows)
         print(f"wrote pp step CSV:  {pp_rows_csv}")
+    if all_od_rows:
+        od_rows_csv = f"{args.out_prefix}_od_steps.csv"
+        write_csv(od_rows_csv, all_od_rows)
+        print(f"wrote od step CSV:  {od_rows_csv}")
     write_json(
         summary_json,
         {
