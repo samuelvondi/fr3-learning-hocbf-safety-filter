@@ -322,6 +322,68 @@ def od_stop_cause(*, u_nom, A_full, b_full, active, psi, psi_eps, omega_min, arg
 
 
 # ---------------------------------------------------------------------
+# joint-limit mode (experimental, --joint-limit-mode)
+# ---------------------------------------------------------------------
+
+JL_MODES = ("nn_g12_fallback", "nn_g12_fallback_recover")
+# Bound rows (after the NUM_PAIR_ROWS collision rows): acc lo, acc hi, vel lo, vel hi, pos lo, pos hi; 7 rows each.
+_POS_LO = slice(NUM_PAIR_ROWS + 4 * NUM_ARM_JOINTS, NUM_PAIR_ROWS + 5 * NUM_ARM_JOINTS)
+_POS_HI = slice(NUM_PAIR_ROWS + 5 * NUM_ARM_JOINTS, NUM_PAIR_ROWS + 6 * NUM_ARM_JOINTS)
+_BRAKE_N = np.arange(0, 101, dtype=float)[:, None]  # braking horizon in steps (peak is reached after < 20)
+
+
+def brake_ddq_bounds(q_arm, dq_arm, limits: dict, dt: float, margin: float) -> tuple[np.ndarray, np.ndarray]:
+    """Per-joint bounds on u such that, after this step, full braking at a = (1 - margin)*|ddq_lim| with the
+    rollout's update (q += dq dt + u dt^2/2, dq += u dt) keeps q inside [q_min, q_max] at every later step.
+
+    n braking steps from (q1, dq1): q_n = q1 + n dq1 dt - a dt^2 n^2 / 2, linear in u for each n.
+    n = 0 is the existing one-step position box, so these bounds only tighten it.
+    """
+    q = np.asarray(q_arm, dtype=float).reshape(1, NUM_ARM_JOINTS)
+    dq = np.asarray(dq_arm, dtype=float).reshape(1, NUM_ARM_JOINTS)
+    n = _BRAKE_N
+    a_up = (1.0 - margin) * np.abs(limits["ddq_min_arm"])  # deceleration while moving towards q_max
+    a_dn = (1.0 - margin) * np.abs(limits["ddq_max_arm"])
+    den = dt ** 2 * (n + 0.5)
+    hi = np.min((limits["q_max_arm"] - q - dt * dq * (1.0 + n) + 0.5 * a_up * dt ** 2 * n ** 2) / den, axis=0)
+    lo = np.max((limits["q_min_arm"] - q - dt * dq * (1.0 + n) - 0.5 * a_dn * dt ** 2 * n ** 2) / den, axis=0)
+    return lo, hi
+
+
+def apply_brake_rows(b_full: np.ndarray, q_arm, dq_arm, limits: dict, dt: float, margin: float):
+    """Tighten the position rows of b_full in place with brake_ddq_bounds.
+
+    Where no braking-viable u exists inside the old box, the brake bound is clipped to the old box
+    (u = strongest braking the box allows), so the brake rows never empty the box on their own.
+    Returns (n joints where the brake bound cuts into the old box, n joints clipped).
+    """
+    b = b_full[NUM_PAIR_ROWS:].reshape(6, NUM_ARM_JOINTS)
+    old_lo = b[[0, 2, 4]].max(axis=0)
+    old_hi = (-b[[1, 3, 5]]).min(axis=0)
+    lo, hi = brake_ddq_bounds(q_arm, dq_arm, limits, dt, margin)
+    clip = (hi < old_lo) | (lo > old_hi)
+    hi = np.maximum(hi, old_lo)
+    lo = np.minimum(lo, old_hi)
+    tight = (hi < old_hi) | (lo > old_lo)  # brake bound cuts into the old box
+    b_full[_POS_LO] = np.maximum(b_full[_POS_LO], lo)
+    b_full[_POS_HI] = np.maximum(b_full[_POS_HI], -hi)
+    return int(np.sum(tight)), int(np.sum(clip))
+
+
+def jl_stop_cause(*, u_nom, A_full, b_full, b_unbraked, args) -> str:
+    """Classify an infeasible hard QP: box_only (joint rows alone, incl. brake rows), brake_vs_hocbf
+    (feasible without the brake tightening), hocbf_rows (collision rows vs. joint box)."""
+    b = b_full[NUM_PAIR_ROWS:].reshape(6, NUM_ARM_JOINTS)
+    if np.any(b[[0, 2, 4]].max(axis=0) > (-b[[1, 3, 5]]).min(axis=0)):
+        return "box_only"
+    if b_unbraked is not None:
+        _, ok, _, _ = solve_hard_qp_osqp(u_nom, A_full, b_unbraked, args.eps_abs, args.eps_rel, args.max_iter)
+        if ok:
+            return "brake_vs_hocbf"
+    return "hocbf_rows"
+
+
+# ---------------------------------------------------------------------
 # per-pair step log helpers
 # ---------------------------------------------------------------------
 
@@ -348,6 +410,7 @@ def rollout_one_policy(
     pp_pack=None,
     pp_log: list[dict] | None = None,
     od_log: list[dict] | None = None,
+    jl_log: list[dict] | None = None,
 ) -> tuple[dict, list[dict]]:
     model = context["model"]
     data = model.createData()
@@ -392,6 +455,11 @@ def rollout_one_policy(
     sum_solve_time = 0.0
     jerk_sq_values: list[float] = []
     prev_ddq_safe = None
+    jl_brake = args.joint_limit_mode == "brake" and mode in JL_MODES
+    jl_brake_steps = 0  # steps where a brake bound is tighter than the one-step position box
+    jl_brake_joints = 0
+    jl_clip_steps = 0  # steps where no braking-viable u existed inside the box (bound clipped)
+    jl_stop = ""
 
     t_rollout_start = time.time()
 
@@ -663,6 +731,37 @@ def rollout_one_policy(
                 ),
                 "qp_status": qp_status,
             }
+        elif jl_brake:
+            u_nom, A_full, b_full, mask_full = build_full_qp_numpy(
+                q_arm=q_arm,
+                dq_arm=dq_arm,
+                u_nom=ddq_nominal,
+                h_all=all_pair_terms["h_all"],
+                Lf_h_all=all_pair_terms["Lf_h_all"],
+                vrel_sq2_all=all_pair_terms["vrel_sq2_all"],
+                Lg_psi_all=all_pair_terms["Lg_psi_all"],
+                pair_mask=all_pair_terms["pair_mask"],
+                p1=p1,
+                p2=p2_qp,
+                dt=dt,
+                ddq_min_arm=joint_limits["ddq_min_arm"],
+                ddq_max_arm=joint_limits["ddq_max_arm"],
+                dq_min_arm=joint_limits["dq_min_arm"],
+                dq_max_arm=joint_limits["dq_max_arm"],
+                q_min_arm=joint_limits["q_min_arm"],
+                q_max_arm=joint_limits["q_max_arm"],
+            )
+            b_unbraked = b_full.copy()
+            n_tight, n_clip = apply_brake_rows(b_full, q_arm, dq_arm, joint_limits, dt, float(args.brake_margin))
+            jl_brake_steps += int(n_tight > 0)
+            jl_brake_joints += n_tight
+            jl_clip_steps += int(n_clip > 0)
+            ddq_safe, qp_solved, qp_status, solve_time_s = solve_hard_qp_osqp(
+                u_nom=u_nom, A_full=A_full, b_full=b_full,
+                eps_abs=args.eps_abs, eps_rel=args.eps_rel, max_iter=args.max_iter,
+            )
+            if not qp_solved:
+                jl_stop = jl_stop_cause(u_nom=u_nom, A_full=A_full, b_full=b_full, b_unbraked=b_unbraked, args=args)
         else:
             (
                 u_nom,
@@ -686,6 +785,8 @@ def rollout_one_policy(
                 eps_rel=args.eps_rel,
                 max_iter=args.max_iter,
             )
+            if not qp_solved and mode in JL_MODES:
+                jl_stop = jl_stop_cause(u_nom=u_nom, A_full=A_full, b_full=b_full, b_unbraked=None, args=args)
 
         if od_step is not None and od_log is not None:
             od_log.append(_od_log_row(scenario_path, k, od_step, args))
@@ -909,6 +1010,19 @@ def rollout_one_policy(
 
     rollout_elapsed_s = time.time() - t_rollout_start
 
+    if jl_log is not None and mode in JL_MODES:
+        jl_log.append({
+            "scenario": Path(scenario_path).stem,
+            "mode": mode,
+            "joint_limit_mode": args.joint_limit_mode,
+            "brake_margin": float(args.brake_margin) if jl_brake else float("nan"),
+            "steps": int(len(rows)),
+            "stop_cause": jl_stop,
+            "brake_steps": jl_brake_steps,
+            "brake_joint_steps": jl_brake_joints,
+            "brake_clip_steps": jl_clip_steps,
+        })
+
     final_ee_pos = ee_position(model, data, ee_frame_id, q_full, dq_full)
     final_dist_to_goal = float(np.linalg.norm(final_ee_pos - goal))
 
@@ -1050,6 +1164,17 @@ def main():
         help="od_hocbf debug: fix omega_j = 1 and solve with the existing hard-QP path (must equal fixed with --p1-fixed/--p2-fixed = --od-gamma/--od-beta).",
     )
 
+    parser.add_argument(
+        "--joint-limit-mode",
+        choices=("box", "brake"),
+        default="box",
+        help="nn_g12_fallback(_recover) only. box: one-step joint box (default, unchanged). brake: the position rows "
+             "also require that full braking at (1 - brake margin)*|ddq_lim| after this step keeps every joint "
+             "inside its limits (exact discrete update).",
+    )
+    parser.add_argument("--brake-margin", type=float, default=0.05,
+                        help="brake: fraction of the acceleration limit held back when computing the braking set.")
+
     parser.add_argument("--dt", type=float, default=1.0 / 50.0)
     parser.add_argument("--max-steps", type=int, default=None, help="Debug cap. Default uses scenario max_sim_duration_s")
     parser.add_argument("--limit-scenarios", type=int, default=None)
@@ -1119,6 +1244,7 @@ def main():
     all_rows: list[dict] = []
     all_pp_rows: list[dict] = []
     all_od_rows: list[dict] = []
+    all_jl_rows: list[dict] = []
 
     total_t0 = time.time()
     for scen_i, scenario_path in enumerate(scenario_paths):
@@ -1133,6 +1259,7 @@ def main():
                 pp_pack=pp_pack,
                 pp_log=all_pp_rows,
                 od_log=all_od_rows,
+                jl_log=all_jl_rows,
             )
             all_summaries.append(summary)
             all_rows.extend(rows)
@@ -1161,6 +1288,10 @@ def main():
         od_rows_csv = f"{args.out_prefix}_od_steps.csv"
         write_csv(od_rows_csv, all_od_rows)
         print(f"wrote od step CSV:  {od_rows_csv}")
+    if all_jl_rows:
+        jl_rows_csv = f"{args.out_prefix}_jl.csv"
+        write_csv(jl_rows_csv, all_jl_rows)
+        print(f"wrote joint-limit CSV: {jl_rows_csv}")
     write_json(
         summary_json,
         {

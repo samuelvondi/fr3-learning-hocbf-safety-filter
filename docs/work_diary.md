@@ -2,7 +2,16 @@
 
 High-level log of what was done. Results and findings are in the topic documents:
 `per_pair_beta_findings.md` (experiments and analyses), `fallback_findings.md` (runtime fallback), `od_hocbf_findings.md` (optimal-decay controller), `dev_notes.md` (environment, tooling, verification),
-`paper_alignment.md` (the 2026-10 alignment of the code with the paper).
+`paper_alignment.md` (the 2026-10 alignment of the code with the paper), `joint_limit_findings.md` (joint-box infeasibility).
+
+## 2026-11-23 — Joint-limit infeasibility, Part A (offline)
+
+- Classified every QP-fail stop of NN + FB, recover B = 200 and the Fixed rerun with an analytic per-joint box test (`data/joint_limits/analyze_box.py`). It agrees with `od_stop_cause` on 30/30 OD stops and gives 29/31 `box_only` for Fixed.
+- `box_only` stops are 6.7 % of runs for NN + FB and 6.3 % for recover. Almost all are the position limit against the acceleration limit, and the joint becomes unrecoverable only 0–1 steps before the stop.
+- Ceiling for joint-limit CBFs: 4.3 % (NN + FB) and 6.3 % (recover) of runs.
+- Part B: added `--joint-limit-mode brake` (exact discrete braking-set bound on the position rows, `--brake-margin`) to `nn_g12_fallback(_recover)`. `box` reproduces HEAD bit-identically on 3 scenarios.
+- Swept box vs. brake (margin 0 / 0.05 / 0.2) on 20 hard scenarios, then on all 460. Safe success: NN + FB 80.4 → 83.0 %, recover B = 200 86.7 → 90.0 %. All `box_only` stops gone; other runs unchanged. `cbf` mode not implemented.
+- Findings in `joint_limit_findings.md`.
 
 ## 2026-11-17 — Optimal-decay HOCBF controller
 
