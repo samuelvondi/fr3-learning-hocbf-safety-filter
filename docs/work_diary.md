@@ -14,7 +14,8 @@ High-level log of what was done. Results and findings are in the topic documents
 - Findings in `joint_limit_findings.md`.
 - Analysed the remaining QP fails and timeouts of recover + brake 0.05. Added the logging-only flag `--dump-failed-qp`, reran the 28 scenarios with a QP stop and computed an IIS and counterfactuals per failure. Classified the timeouts from the step logs.
 - Findings in `remaining_failures_findings.md`.
-- Added `--nominal-ns-damping Kd` (null-space velocity damping in the nominal; 0 = unchanged, bit-identical on 3 scenarios). Pre-run on 24 hard scenarios: removes the joint-7 spin, recover safe successes 4 → 12. Full 460 run still open.
+- Added `--nominal-ns-damping Kd` (null-space velocity damping in the nominal; 0 = unchanged, bit-identical on 3 scenarios). Pre-run on 24 hard scenarios: removes the joint-7 spin, recover safe successes 4 → 12.
+- Full 460 run of the damping with brake 0.05: recover 90.0 → 92.6 % safe success (K_d = 20, 0 % violations), NN + FB 83.0 → 85.2 % (K_d = 10, violations 12.2 → 9.8 %).
 
 ## 2026-11-17 — Optimal-decay HOCBF controller
 
