@@ -788,6 +788,20 @@ def rollout_one_policy(
             if not qp_solved and mode in JL_MODES:
                 jl_stop = jl_stop_cause(u_nom=u_nom, A_full=A_full, b_full=b_full, b_unbraked=None, args=args)
 
+        if not qp_solved and mode in JL_MODES and args.dump_failed_qp:
+            # Debug dump of the infeasible QP (logging only, no effect on the rollout).
+            Path(args.dump_failed_qp).mkdir(parents=True, exist_ok=True)
+            np.savez(
+                Path(args.dump_failed_qp) / f"{Path(scenario_path).stem}_{mode}.npz",
+                step=k, stop_cause=jl_stop, u_nom=u_nom, A_full=A_full, b_full=b_full, mask_full=mask_full,
+                b_unbraked=b_unbraked if jl_brake else b_full, p1=float(p1), p2=float(p2),
+                p2_qp=np.broadcast_to(np.asarray(p2_qp, dtype=float), (NUM_PAIR_ROWS,)).copy(),
+                recover_rows=recover_rows, fallback_used=bool(fallback_used), q=q_arm, dq=dq_arm,
+                prev_ddq_safe=prev_ddq_safe if prev_ddq_safe is not None else np.full(NUM_ARM_JOINTS, np.nan),
+                **{key: np.asarray(all_pair_terms[key], dtype=float)
+                   for key in ("h_all", "Lf_h_all", "vrel_sq2_all", "Lg_psi_all", "pair_mask")},
+            )
+
         if od_step is not None and od_log is not None:
             od_log.append(_od_log_row(scenario_path, k, od_step, args))
 
@@ -1172,6 +1186,8 @@ def main():
              "also require that full braking at (1 - brake margin)*|ddq_lim| after this step keeps every joint "
              "inside its limits (exact discrete update).",
     )
+    parser.add_argument("--dump-failed-qp", type=str, default=None,
+                        help="Debug: directory for an .npz dump of every infeasible QP (nn_g12_fallback(_recover) only).")
     parser.add_argument("--brake-margin", type=float, default=0.05,
                         help="brake: fraction of the acceleration limit held back when computing the braking set.")
 

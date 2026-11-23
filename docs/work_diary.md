@@ -2,7 +2,7 @@
 
 High-level log of what was done. Results and findings are in the topic documents:
 `per_pair_beta_findings.md` (experiments and analyses), `fallback_findings.md` (runtime fallback), `od_hocbf_findings.md` (optimal-decay controller), `dev_notes.md` (environment, tooling, verification),
-`paper_alignment.md` (the 2026-10 alignment of the code with the paper), `joint_limit_findings.md` (joint-box infeasibility).
+`paper_alignment.md` (the 2026-10 alignment of the code with the paper), `joint_limit_findings.md` (joint-box infeasibility), `remaining_failures_findings.md` (QP fails and timeouts left after brake).
 
 ## 2026-11-23 — Joint-limit infeasibility, Part A (offline)
 
@@ -12,6 +12,8 @@ High-level log of what was done. Results and findings are in the topic documents
 - Part B: added `--joint-limit-mode brake` (exact discrete braking-set bound on the position rows, `--brake-margin`) to `nn_g12_fallback(_recover)`. `box` reproduces HEAD bit-identically on 3 scenarios.
 - Swept box vs. brake (margin 0 / 0.05 / 0.2) on 20 hard scenarios, then on all 460. Safe success: NN + FB 80.4 → 83.0 %, recover B = 200 86.7 → 90.0 %. All `box_only` stops gone; other runs unchanged. `cbf` mode not implemented.
 - Findings in `joint_limit_findings.md`.
+- Analysed the remaining QP fails and timeouts of recover + brake 0.05. Added the logging-only flag `--dump-failed-qp`, reran the 28 scenarios with a QP stop and computed an IIS and counterfactuals per failure. Classified the timeouts from the step logs.
+- Findings in `remaining_failures_findings.md`.
 
 ## 2026-11-17 — Optimal-decay HOCBF controller
 
