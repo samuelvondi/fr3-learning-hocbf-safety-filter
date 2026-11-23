@@ -68,8 +68,29 @@ The patterns overlap, so the columns sum to more than the run count.
   The cause is in `sim/nominal_controller.py`. It is a 3-D position task, so the 4-D null space has no velocity damping, and joint 7 does not move the end-effector position (nominal ddq₇ = 0). Velocity the QP gives joint 7, for example to turn the hand away from an obstacle, is never removed.
 - **Limit push:** the nominal drives a joint (1, 2, 5 or 6) into its limit with up to −280 rad/s². The brake rows hold the joint and the arm chatters at the limit. The nominal's own joint-limit term is too weak and acts only in the outer 10 % of the range.
 
+## Null-space damping in the nominal (pre-run only)
+
+Flag `--nominal-ns-damping Kd` (default 0; all modes). It adds −K_d·(I − J⁺J)·dq to the nominal acceleration, damping the 4-D null space of the position task.
+- The column of the position Jacobian for joint 7 is exactly 0, so joint 7 lies entirely in the null space and is damped directly.
+- With K_d = 0 the code reproduces the reference runs bit-identically on 3 scenarios, for both modes.
+- The NN still sees the changed nominal as an input; the NN was not retrained.
+
+**Pre-run** with brake 0.05 on 24 hard scenarios (`data/joint_limits/runs_ns24/`): the 18 recover timeouts plus 6 NN + FB violation runs. These are counts on this selection, not benchmark percentages; the full 460 run is still open.
+
+| K_d | NN + FB: safe / viol / QP fail / timeout | Recover B = 200: safe / viol / QP fail / timeout | Steps with \|dq₇\| > 2.7 (FB / rec) |
+|---|---|---|---|
+| 0 (brake 0.05) | 0 / 16 / 0 / 8 | 4 / 0 / 2 / 18 | 25.5 % / 20.2 % |
+| 2 | 4 / 14 / 0 / 6 | 8 / 0 / 4 / 12 | 0.1 % / 0.0 % |
+| 5 | 5 / 12 / 1 / 6 | 11 / 0 / 2 / 11 | 0 / 0 |
+| 10 | 6 / 11 / 2 / 5 | 12 / 0 / 2 / 10 | 0 / 0 |
+| 20 | 6 / 11 / 0 / 7 | 12 / 0 / 0 / 12 | 0 / 0 |
+
+- **Joint 7 stops spinning from K_d = 2 on.** Mean intervention on these runs stays about the same (82–98 vs. 89–91 at K_d = 0).
+- **Recover:** safe successes rise from 4 to 12 of 24 at K_d = 10–20; most come from former timeouts. NN + FB: violations fall from 16 to 11.
+- **Open:** the full 460 run with K_d = 10 and 20, to check that the many runs that already succeed are not hurt.
+
 ## Possible next steps (not done)
 
-- Null-space velocity damping in the nominal controller, e.g. −K_d·(I − J⁺J)·dq. This changes the nominal, so it needs a new flag; it would also change the training data. Expected to address the joint-7 spin and part of the violations.
+- Full 460 run of the null-space damping (see above).
 - A solver fallback on `user_limit` (more iterations or Clarabel) as a flag: up to 1.3 % of runs.
 - The truly infeasible stops need earlier action (larger effective safety distance or a lower γ for fast closing speeds). Gain changes at the failing step only rarely help.

@@ -491,6 +491,7 @@ def rollout_one_policy(
             dq_arm_curr=dq_arm,
             target_ee_pos_cartesian=goal,
             target=target_prev,
+            ns_damping=float(args.nominal_ns_damping),
         )
 
         h_feat_all = all_pair_terms["h_all"].copy()
@@ -1186,6 +1187,9 @@ def main():
              "also require that full braking at (1 - brake margin)*|ddq_lim| after this step keeps every joint "
              "inside its limits (exact discrete update).",
     )
+    parser.add_argument("--nominal-ns-damping", type=float, default=0.0,
+                        help="Experimental, all modes: null-space velocity damping Kd in the nominal controller, "
+                             "ddq_nom -= Kd * (I - J+ J) dq. 0 (default) leaves the nominal unchanged.")
     parser.add_argument("--dump-failed-qp", type=str, default=None,
                         help="Debug: directory for an .npz dump of every infeasible QP (nn_g12_fallback(_recover) only).")
     parser.add_argument("--brake-margin", type=float, default=0.05,

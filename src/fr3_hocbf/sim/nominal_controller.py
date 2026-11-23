@@ -17,6 +17,7 @@ def nominal_controller_js_standalone(
     dq_arm_curr,
     target_ee_pos_cartesian,
     target,
+    ns_damping: float = 0.0,
 ):
     """
     Plain-Python version of the JS PD nominal controller from pd_nominal_controller.py.
@@ -27,6 +28,8 @@ def nominal_controller_js_standalone(
         dq_arm_curr              : current 7D joint velocity
         target_ee_pos_cartesian  : desired Cartesian EE position, shape (3,)
         target                   : previous smoothed target, shape (3,)
+        ns_damping               : experimental; if > 0, adds -ns_damping * (I - J+ J) dq
+                                   (velocity damping in the null space of the position task)
 
     Returns:
         ddq_nominal_arm          : nominal 7D joint acceleration
@@ -97,5 +100,7 @@ def nominal_controller_js_standalone(
 
     # combine
     ddq_nominal_arm = ddq_primary_task + ddq_secondary_projected
+    if ns_damping > 0.0:
+        ddq_nominal_arm = ddq_nominal_arm - ns_damping * (null_space_projector @ dq_arm_curr)
 
     return ddq_nominal_arm, target
