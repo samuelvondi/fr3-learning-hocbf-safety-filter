@@ -79,6 +79,7 @@ from fr3_hocbf.differentiable.qp_rows import build_full_qp_torch_batch, build_fu
 from fr3_hocbf.policy.p12_net import P12ParamNet
 from fr3_hocbf.policy.pp_beta import PP_ARCH, PP_FEATURE_NAMES, PerPairBetaNet, kinematic_ddq_bounds_torch
 from fr3_hocbf.train.config import DT_DEFAULT, RolloutTrainCfg
+from fr3_hocbf.train.parallel import SegmentPool, WeightEMA, apply_batch_update, make_lr_scheduler
 from fr3_hocbf.train.checkpointing import (
     aggregate_stats,
     guard_against_accidental_overwrite,
@@ -258,7 +259,10 @@ def train_one_segment(
     per_pair = isinstance(model, PerPairBetaNet)
     if train:
         model.train()
-        optimizer.zero_grad()
+        if optimizer is not None:
+            optimizer.zero_grad()
+        else:  # parallel worker: only the gradient is returned (train/parallel.py)
+            model.zero_grad(set_to_none=True)
     else:
         model.eval()
 
@@ -338,6 +342,10 @@ def train_one_segment(
     )
 
     for k in range(H):
+        # Truncated backpropagation through the rollout (experimental): the gradient flows back
+        # through the state only within windows of state_grad_window steps.
+        if cfg.state_grad_window > 0 and k % cfg.state_grad_window == 0:
+            q, dq = q.detach(), dq.detach()
         if cfg.move_obstacles:
             obstacles = update_obstacles_torch(obstacles, cfg.dt)
         else:
@@ -628,8 +636,9 @@ def train_one_segment(
 
     if train:
         loss_total.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.grad_clip)
-        optimizer.step()
+        if optimizer is not None:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=cfg.grad_clip)
+            optimizer.step()
 
     goal_mean_dist = float(goal_dist_sum / float(max(1, H)))
     goal_progress_ratio = float(goal_final_dist / max(goal_initial_dist, cfg.goal_progress_eps))
@@ -746,6 +755,24 @@ def main():
     parser.add_argument("--safety-topk-frac", type=float, default=0.05, help="Fraction of positive safety violations used by the top-k h/G1 losses")
     parser.add_argument("--grad-clip", type=float, default=5.0)
 
+    # Experimental stabilisation flags (defaults = original training, bit-identical).
+    parser.add_argument("--batch-segments", type=int, default=1,
+                        help="Segments whose gradients are averaged per optimizer step. 1 = original per-segment step.")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="Worker processes for segment gradients and validation (train/parallel.py). >1 or "
+                             "--batch-segments > 1 uses the parallel path.")
+    parser.add_argument("--lr-schedule", choices=["constant", "cosine"], default="constant",
+                        help="cosine: decay from --lr to --lr-min over all optimizer steps.")
+    parser.add_argument("--lr-min", type=float, default=1e-5)
+    parser.add_argument("--ema", type=float, default=0.0,
+                        help="EMA decay of the weights per optimizer step (0 = off). Validation and saved "
+                             "checkpoints use the EMA weights.")
+    parser.add_argument("--state-grad-window", type=int, default=0,
+                        help="Truncated backprop: detach q, dq every K steps (0 = full horizon, original).")
+    parser.add_argument("--seg-grad-clip", type=float, default=0.0,
+                        help="Parallel path: clip each segment gradient to this norm before averaging (0 = off).")
+    parser.add_argument("--val-fixed", action="store_true",
+                        help="Sample the validation segments once (own RNG) and reuse them at every validation.")
     parser.add_argument("--val-every", type=int, default=1)
     parser.add_argument("--val-segments", type=int, default=5)
     parser.add_argument("--safe-pair-viol-tol", type=float, default=1e-6)
@@ -814,6 +841,7 @@ def main():
         dqp_row_norm_eps=args.dqp_row_norm_eps,
         move_obstacles=args.move_obstacles,
         grad_clip=args.grad_clip,
+        state_grad_window=args.state_grad_window,
         val_every=args.val_every,
         val_segments=args.val_segments,
         val_rollout_dir=args.val_rollout_dir,
@@ -975,6 +1003,14 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
 
+    batch_segments = max(1, int(args.batch_segments))
+    use_pool = batch_segments > 1 or int(args.workers) > 1
+    updates_per_epoch = -(-cfg.segments_per_epoch // batch_segments)
+    scheduler = make_lr_scheduler(optimizer, args.lr_schedule, cfg.epochs * updates_per_epoch, args.lr_min)
+    ema = WeightEMA(model, args.ema) if args.ema > 0.0 else None
+    print(f"batch_segments = {batch_segments} | workers = {args.workers} | updates/epoch = {updates_per_epoch} | "
+          f"lr_schedule = {args.lr_schedule} | ema = {args.ema} | val_fixed = {args.val_fixed}")
+
     limits_np = get_joint_limits()
     limits_t = {key: torch.tensor(value, dtype=torch.double) for key, value in limits_np.items()}
 
@@ -988,11 +1024,42 @@ def main():
     rng = random.Random(cfg.seed)
     total_t0 = time.time()
 
+    def sample_spec(files, r):
+        if cfg.sample_from_rollouts:
+            return sample_start_state_from_rollout(
+                rollout_files=files, scenario_map=scenario_map, horizon=cfg.horizon,
+                start_step_min=cfg.start_step_min, start_step_max=cfg.start_step_max, rng=r,
+            )
+        return r.choice(scenario_paths), None
+
+    fixed_val_specs = None
+    if args.val_fixed:
+        val_rng = random.Random(cfg.seed + 7919)
+        fixed_val_specs = [sample_spec(val_rollout_files, val_rng) for _ in range(cfg.val_segments)]
+
+    pool = None
+    if use_pool:
+        pool = SegmentPool(args.workers, model, cfg, feat_mean, feat_std, args.fast_kinematics)
+
     for epoch in range(1, cfg.epochs + 1):
         epoch_t0 = time.time()
         seg_stats: list[dict] = []
 
-        for seg_idx in range(cfg.segments_per_epoch):
+        if pool is not None:
+            specs = [sample_spec(rollout_files, rng) for _ in range(cfg.segments_per_epoch)]
+            for b0 in range(0, len(specs), batch_segments):
+                results = pool.run(model, specs[b0:b0 + batch_segments], train=True)
+                n_used = apply_batch_update(model, optimizer, results, cfg.grad_clip, args.seg_grad_clip)
+                if scheduler is not None:
+                    scheduler.step()
+                if ema is not None:
+                    ema.update(model)
+                seg_stats.extend(st for _, st in results)
+                print(f"epoch {epoch}/{cfg.epochs} update {b0 // batch_segments + 1}/{updates_per_epoch} | "
+                      f"segments {n_used}/{len(results)} | lr {optimizer.param_groups[0]['lr']:.2e} | "
+                      f"mean loss {np.nanmean([st['loss'] for _, st in results]):.3e}")
+
+        for seg_idx in range(cfg.segments_per_epoch if pool is None else 0):
             start_state = None
             if cfg.sample_from_rollouts:
                 scenario_path, start_state = sample_start_state_from_rollout(
@@ -1029,6 +1096,10 @@ def main():
                 train=True,
                 start_state=start_state,
             )
+            if scheduler is not None:
+                scheduler.step()
+            if ema is not None:
+                ema.update(model)
 
             if stats.get("solver_failed", False):
                 print(
@@ -1080,8 +1151,25 @@ def main():
 
         # Optional validation segments. Checkpointing uses validation when enabled,
         # otherwise it falls back to the training epoch aggregate.
+        if ema is not None:
+            ema.swap(model)  # validation and checkpoints use the EMA weights; swapped back at the end of the epoch
         val_ep = None
-        if cfg.val_every > 0 and cfg.val_segments > 0 and (epoch % cfg.val_every == 0):
+        if cfg.val_every > 0 and cfg.val_segments > 0 and (epoch % cfg.val_every == 0) and (
+            fixed_val_specs is not None or pool is not None
+        ):
+            specs = fixed_val_specs or [sample_spec(val_rollout_files, rng) for _ in range(cfg.val_segments)]
+            if pool is not None:
+                val_stats = [st for _, st in pool.run(model, specs, train=False)]
+            else:
+                val_stats = [
+                    train_one_segment(
+                        scenario_path=sp, pin_context=pin_context, torch_kin=torch_kin, model=model,
+                        bound_slack_layer=bound_slack_layer, optimizer=optimizer, feat_mean=feat_mean,
+                        feat_std=feat_std, limits_t=limits_t, cfg=cfg, train=False, start_state=st,
+                    )
+                    for sp, st in specs
+                ]
+        elif cfg.val_every > 0 and cfg.val_segments > 0 and (epoch % cfg.val_every == 0):
             val_stats: list[dict] = []
             for val_idx in range(cfg.val_segments):
                 start_state = None
@@ -1113,6 +1201,7 @@ def main():
                 )
                 val_stats.append(stats_val)
 
+        if cfg.val_every > 0 and cfg.val_segments > 0 and (epoch % cfg.val_every == 0):
             val_ep = aggregate_stats(val_stats)
             if val_ep:
                 val_ep["epoch"] = epoch
@@ -1201,6 +1290,12 @@ def main():
                 f"min_psi={ckpt_ep.get('min_psi', float('nan')):.3e} "
                 f"min_g2={ckpt_ep.get('min_g2', float('nan')):.3e}"
             )
+
+        if ema is not None:
+            ema.swap(model)  # back to the live weights for the next epoch
+
+    if pool is not None:
+        pool.close()
 
     print("\n=== ROLLOUT TRAINING DONE ===")
     print("elapsed_min =", (time.time() - total_t0) / 60.0)

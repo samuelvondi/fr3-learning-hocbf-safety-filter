@@ -66,6 +66,8 @@ class RolloutTrainCfg:
     move_obstacles: bool = True
     detach_nominal: bool = True
     grad_clip: float = 5.0
+    # Truncated backprop through the rollout: detach q, dq every K steps (0 = full horizon).
+    state_grad_window: int = 0
 
     # Validation / checkpointing.
     val_every: int = 1

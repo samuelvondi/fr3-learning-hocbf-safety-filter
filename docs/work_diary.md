@@ -2,7 +2,14 @@
 
 High-level log of what was done. Results and findings are in the topic documents:
 `per_pair_beta_findings.md` (experiments and analyses), `fallback_findings.md` (runtime fallback), `od_hocbf_findings.md` (optimal-decay controller), `dev_notes.md` (environment, tooling, verification),
-`paper_alignment.md` (the 2026-10 alignment of the code with the paper), `joint_limit_findings.md` (joint-box infeasibility), `remaining_failures_findings.md` (QP fails and timeouts left after brake).
+`paper_alignment.md` (the 2026-10 alignment of the code with the paper), `joint_limit_findings.md` (joint-box infeasibility), `remaining_failures_findings.md` (QP fails and timeouts left after brake), `training_stability_findings.md` (why the training does not converge).
+
+## 2026-11-23 — Training stability
+
+- Measured the training gradients: they explode with the rollout horizon (up to 10⁶⁸ at 50 steps), so about every seventh update of the published training was a random step at maximum size.
+- Added opt-in training flags: parallel mini-batches, truncated backprop, per-segment clipping, cosine LR, EMA, fixed validation set. Default stays bit-identical (`verify.sh quick`).
+- Pilot (10 epochs, 3 variants): the training is stable with truncated backprop, but the training loss barely distinguishes networks (untrained ≈ published).
+- Findings in `training_stability_findings.md`.
 
 ## 2026-11-23 — Joint-limit infeasibility, Part A (offline)
 
